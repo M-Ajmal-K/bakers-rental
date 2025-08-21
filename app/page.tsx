@@ -309,6 +309,30 @@ export default function HomePage() {
                   <LocationIcon className="h-5 w-5" />
                   <span className="text-lg">Suva, Fiji</span>
                 </div>
+
+                {/* Small location map with business label */}
+                <div className="pt-2">
+                  <div className="w-full h-48 sm:h-56 md:h-64 rounded-xl overflow-hidden border border-white/20">
+                    <iframe
+                      title="Bakers Rentals Location"
+                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3116.161663853867!2d177.4852363!3d-18.1625008!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x6e10a975790eaf95%3A0xc092707025335a!2sBakers%20Rental%20Cars!5e0!3m2!1sen!2sfj!4v1724080000000!5m2!1sen!2sfj"
+                      width="100%"
+                      height="100%"
+                      style={{ border: 0 }}
+                      allowFullScreen
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                  </div>
+                  <a
+                    href="https://www.google.com/maps/place/Bakers+Rental+Cars/@-18.1625008,177.4852363,788m/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white/80 underline text-sm block mt-2"
+                  >
+                    Open in Google Maps
+                  </a>
+                </div>
               </div>
             </div>
           </div>
