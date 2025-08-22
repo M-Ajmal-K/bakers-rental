@@ -23,7 +23,7 @@ import Image from "next/image"
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
-const STORAGE_BUCKET = "vehicle-images"
+const STORAGE_BUCKET = "vehicle-photos"
 
 // Warn loudly if env missing
 if (!supabase) {
