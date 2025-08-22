@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, memo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { format } from "date-fns"
@@ -133,6 +133,97 @@ interface Booking {
   notes: string
 }
 
+/* ---------------- Mobile card for bookings (no logic changed) ---------------- */
+const MobileBookingCard = memo(function MobileBookingCard({
+  booking,
+  onView,
+  onEdit,
+  onDelete,
+  getStatusBadge,
+  calculateDays,
+}: {
+  booking: Booking
+  onView: (b: Booking) => void
+  onEdit: (b: Booking) => void
+  onDelete: (id: number) => void
+  getStatusBadge: (s: string) => JSX.Element
+  calculateDays: (a: string, b: string) => number
+}) {
+  return (
+    <Card className="border-0 glass-effect-dark">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm text-white/70">{format(new Date(booking.createdAt), "MMM dd, yyyy")}</p>
+            <h3 className="text-base font-semibold text-white">{booking.bookingRef}</h3>
+          </div>
+          {getStatusBadge(String(booking.status))}
+        </div>
+
+        <div className="text-sm text-white/80 space-y-1">
+          <p className="font-medium text-white">{booking.customerName}</p>
+          <p className="truncate">{booking.customerEmail}</p>
+          <p className="truncate">{booking.customerPhone}</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="bg-white/5 rounded p-2">
+            <p className="text-white/60">Vehicle</p>
+            <p className="font-medium text-white">{booking.vehicleName}</p>
+          </div>
+          <div className="bg-white/5 rounded p-2">
+            <p className="text-white/60">Amount</p>
+            <p className="font-semibold text-white">${booking.totalAmount}</p>
+          </div>
+          <div className="bg-white/5 rounded p-2 col-span-2">
+            <p className="text-white/60">Dates</p>
+            <p className="text-white">
+              {format(new Date(booking.pickupDate), "MMM dd")} – {format(new Date(booking.returnDate), "MMM dd")} ·{" "}
+              {calculateDays(booking.pickupDate, booking.returnDate)} day
+              {calculateDays(booking.pickupDate, booking.returnDate) !== 1 ? "s" : ""}
+            </p>
+          </div>
+          <div className="bg-white/5 rounded p-2">
+            <p className="text-white/60">Pickup</p>
+            <p className="text-white truncate">{booking.pickupLocation}</p>
+          </div>
+          <div className="bg-white/5 rounded p-2">
+            <p className="text-white/60">Drop-off</p>
+            <p className="text-white truncate">{booking.dropoffLocation}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onView(booking)}
+            className="h-8 px-3 glass-effect-dark text-white border-white/20 hover:bg-white/10"
+          >
+            <Eye className="h-3.5 w-3.5 mr-1" /> View
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onEdit(booking)}
+            className="h-8 px-3 glass-effect-dark text-white border-white/20 hover:bg-white/10"
+          >
+            <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onDelete(booking.id)}
+            className="h-8 px-3 glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+})
+
 function BookingManagementContent() {
   const router = useRouter()
   const [bookings, setBookings] = useState<Booking[]>(initialBookings)
@@ -144,7 +235,7 @@ function BookingManagementContent() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
   const [editFormData, setEditFormData] = useState({ status: "", notes: "" })
 
-  // 👇 Ensure fade-in sections become visible (prevents "invisible until animated" bug)
+  // Ensure fade-ins are visible
   useEffect(() => {
     const activate = () => {
       document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
@@ -222,66 +313,66 @@ function BookingManagementContent() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
       <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <Link href="/admin/dashboard" className="flex items-center space-x-3 group">
-              <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                <Car className="h-6 w-6 text-white" />
+              <div className="w-10 h-10 md:w-12 md:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                <Car className="h-5 w-5 md:h-6 md:w-6 text-white" />
               </div>
               <div>
-                <span className="text-2xl font-bold text-white">Bakers Rentals</span>
-                <p className="text-white/80 text-sm">Booking Management</p>
+                <span className="text-xl md:text-2xl font-bold text-white leading-none">Bakers Rentals</span>
+                <p className="text-xs md:text-sm text-white/80">Booking Management</p>
               </div>
             </Link>
             <Button
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent"
+              className="h-9 md:h-10 px-3 md:px-4 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent"
             >
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
+              <LogOut className="h-4 w-4 mr-1.5" />
+              <span className="hidden sm:inline">Logout</span>
             </Button>
           </div>
         </div>
       </nav>
 
-      <section className="py-12 px-4">
+      <section className="py-8 md:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
-          <div className="fade-in-up mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-lg">Booking Management</h1>
-            <p className="text-white/80 text-xl">View and manage customer reservations</p>
+          <div className="fade-in-up mb-8 md:mb-12">
+            <h1 className="text-3xl md:text-5xl font-bold text-white mb-2 md:mb-4 drop-shadow-lg">Booking Management</h1>
+            <p className="text-white/80 text-base md:text-xl">View and manage customer reservations</p>
           </div>
 
           {/* Filters */}
-          <div className="fade-in-up mb-8" style={{ animationDelay: "0.2s" }}>
+          <div className="fade-in-up mb-6 md:mb-8" style={{ animationDelay: "0.2s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-3 text-white text-xl">
-                  <Filter className="h-6 w-6 text-white" />
+              <CardHeader className="pb-3 md:pb-4">
+                <CardTitle className="flex items-center gap-2 md:gap-3 text-white text-lg md:text-xl">
+                  <Filter className="h-5 w-5 md:h-6 md:w-6 text-white" />
                   Advanced Filters
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex flex-col md:flex-row gap-4 md:gap-6">
                   <div className="flex-1">
-                    <Label htmlFor="search" className="text-white/80 font-medium">
+                    <Label htmlFor="search" className="text-white/80 font-medium text-sm md:text-base">
                       Search Bookings
                     </Label>
                     <Input
                       id="search"
-                      placeholder="Search by customer name, booking ref, or vehicle..."
+                      placeholder="Search by customer, ref, or vehicle..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="mt-2 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
+                      className="mt-2 h-10 md:h-11 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
                     />
                   </div>
                   <div className="w-full md:w-48">
-                    <Label htmlFor="status" className="text-white/80 font-medium">
+                    <Label htmlFor="status" className="text-white/80 font-medium text-sm md:text-base">
                       Status Filter
                     </Label>
                     <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as BookingStatus | "all")}>
-                      <SelectTrigger className="mt-2 btn-3d glass-effect-dark text-white border-white/20">
+                      <SelectTrigger className="mt-2 h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20">
                         <SelectValue placeholder="All Statuses" />
                       </SelectTrigger>
                       <SelectContent className="glass-effect-dark border-white/20">
@@ -298,8 +389,30 @@ function BookingManagementContent() {
             </Card>
           </div>
 
-          {/* Table */}
-          <div className="fade-in-up" style={{ animationDelay: "0.4s" }}>
+          {/* Mobile: Card list */}
+          <div className="grid gap-4 md:hidden">
+            {filteredBookings.map((booking) => (
+              <MobileBookingCard
+                key={booking.id}
+                booking={booking}
+                onView={handleViewBooking}
+                onEdit={handleEditBooking}
+                onDelete={handleDeleteBooking}
+                getStatusBadge={getStatusBadge}
+                calculateDays={calculateDays}
+              />
+            ))}
+            {filteredBookings.length === 0 && (
+              <div className="text-center py-12">
+                <Calendar className="h-12 w-12 text-white/40 mx-auto mb-3" />
+                <h3 className="text-lg font-semibold text-white mb-1">No bookings found</h3>
+                <p className="text-white/70 text-sm">Try adjusting your filters to see more results</p>
+              </div>
+            )}
+          </div>
+
+          {/* Desktop/Tablet: Table */}
+          <div className="fade-in-up hidden md:block" style={{ animationDelay: "0.4s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
               <CardHeader>
                 <CardTitle className="text-white text-2xl">All Bookings ({filteredBookings.length})</CardTitle>
@@ -399,9 +512,15 @@ function BookingManagementContent() {
 
           {/* View Dialog */}
           <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-            <DialogContent className="max-w-2xl glass-effect-dark border-white/20">
+            <DialogContent
+              forceMount
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+            >
+              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
-                <DialogTitle className="text-white text-2xl">Booking Details</DialogTitle>
+                <DialogTitle className="text-white text-xl md:text-2xl">Booking Details</DialogTitle>
               </DialogHeader>
               {selectedBooking && (
                 <div className="space-y-6">
@@ -412,7 +531,7 @@ function BookingManagementContent() {
                         <p>
                           <span className="text-white/70">Reference:</span> {selectedBooking.bookingRef}
                         </p>
-                        <p>
+                        <p className="flex items-center gap-2">
                           <span className="text-white/70">Status:</span> {getStatusBadge(String(selectedBooking.status))}
                         </p>
                         <p>
@@ -431,7 +550,7 @@ function BookingManagementContent() {
                         <p>
                           <span className="text-white/70">Name:</span> {selectedBooking.customerName}
                         </p>
-                        <p className="flex items-center gap-2">
+                        <p className="flex items-center gap-2 break-all">
                           <Mail className="h-4 w-4 text-white/70" />
                           {selectedBooking.customerEmail}
                         </p>
@@ -492,9 +611,15 @@ function BookingManagementContent() {
 
           {/* Edit Dialog */}
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-            <DialogContent className="glass-effect-dark border-white/20">
+            <DialogContent
+              forceMount
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+            >
+              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
-                <DialogTitle className="text-white text-2xl">Edit Booking</DialogTitle>
+                <DialogTitle className="text-white text-xl md:text-2xl">Edit Booking</DialogTitle>
               </DialogHeader>
               {selectedBooking && (
                 <form onSubmit={handleUpdateBooking} className="space-y-4">
@@ -506,7 +631,7 @@ function BookingManagementContent() {
                       value={editFormData.status}
                       onValueChange={(value) => setEditFormData({ ...editFormData, status: value })}
                     >
-                      <SelectTrigger className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10">
+                      <SelectTrigger className="h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10">
                         <SelectValue placeholder="Choose status" />
                       </SelectTrigger>
                       <SelectContent className="glass-effect-dark border-white/20">
@@ -535,12 +660,12 @@ function BookingManagementContent() {
                       placeholder="Add notes about this booking..."
                       value={editFormData.notes}
                       onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                      className="btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
+                      className="h-10 md:h-11 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
                     />
                   </div>
 
-                  <div className="flex gap-2 pt-4">
-                    <Button type="submit" className="bg-primary hover:bg-primary/90 text-white">
+                  <div className="flex gap-2 pt-2">
+                    <Button type="submit" className="h-10 md:h-11 px-4 bg-primary hover:bg-primary/90 text-white">
                       Update Booking
                     </Button>
                     <Button
@@ -550,7 +675,7 @@ function BookingManagementContent() {
                         setIsEditDialogOpen(false)
                         setSelectedBooking(null)
                       }}
-                      className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
+                      className="h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
                     >
                       Cancel
                     </Button>
