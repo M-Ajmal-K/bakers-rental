@@ -19,13 +19,13 @@ import { Car, Plus, Edit, Trash2, Upload, LogOut } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 
-// ---- Supabase client from env (falls back to mock if not present) ----
+// ---- Supabase client from env ----
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
 const STORAGE_BUCKET = "vehicle-images"
 
-// ---- Mock vehicle data (fallback only) ----
+// ---- Fallback mock (only used if Supabase env not provided) ----
 const initialVehicles = [
   {
     id: 1,
@@ -43,57 +43,8 @@ const initialVehicles = [
     year: 2022,
     licensePlate: "FJ-1234",
   },
-  {
-    id: 2,
-    name: "Honda Odyssey",
-    brand: "Honda",
-    model: "Odyssey",
-    image: "/placeholder-xywqi.png",
-    pricePerDay: 120,
-    passengers: 8,
-    transmission: "Automatic",
-    fuel: "Petrol",
-    available: false,
-    description: "Spacious van ideal for large groups",
-    features: ["Air Conditioning", "GPS", "USB Charging", "Extra Storage"],
-    year: 2021,
-    licensePlate: "FJ-5678",
-  },
-  {
-    id: 3,
-    name: "Nissan X-Trail",
-    brand: "Nissan",
-    model: "X-Trail",
-    image: "/nissan-x-trail-adventure.png",
-    pricePerDay: 90,
-    passengers: 7,
-    transmission: "Automatic",
-    fuel: "Petrol",
-    available: true,
-    description: "Adventure-ready SUV with 4WD capability",
-    features: ["4WD", "Air Conditioning", "GPS", "Roof Rails"],
-    year: 2023,
-    licensePlate: "FJ-9012",
-  },
-  {
-    id: 4,
-    name: "Toyota Hiace",
-    brand: "Toyota",
-    model: "Hiace",
-    image: "/toyota-hiace-van.png",
-    pricePerDay: 110,
-    passengers: 12,
-    transmission: "Manual",
-    fuel: "Diesel",
-    available: true,
-    description: "Large capacity van for group transportation",
-    features: ["Air Conditioning", "Large Cargo Space", "Sliding Doors"],
-    year: 2020,
-    licensePlate: "FJ-3456",
-  },
 ]
 
-// Options kept for UI (not stored in DB)
 const transmissionTypes = ["Automatic", "Manual"]
 const fuelTypes = ["Petrol", "Diesel", "Hybrid", "Electric"]
 
@@ -387,7 +338,6 @@ function VehicleManagementContent() {
 
   const router = useRouter()
 
-  // Make fade-in sections visible (prevents "blank content" if CSS hides until animated)
   useEffect(() => {
     const activate = () => {
       document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
@@ -400,7 +350,7 @@ function VehicleManagementContent() {
   // Load vehicles from Supabase (fallback to mock on error or if client missing)
   useEffect(() => {
     const load = async () => {
-      if (!supabase) return // stay on mock
+      if (!supabase) return // stay on mock if env not provided
 
       const { data, error } = await supabase
         .from("vehicles")
@@ -425,9 +375,9 @@ function VehicleManagementContent() {
           category: `${v.brand} ${v.model}`,
           image: publicUrl,
           pricePerDay: Number(v.rental_price ?? 0),
-          passengers: 5, // UI default
-          transmission: "Automatic", // UI default
-          fuel: "Petrol", // UI default
+          passengers: 5, // UI defaults
+          transmission: "Automatic",
+          fuel: "Petrol",
           available: Boolean(v.available),
           description: "",
           features: [],
@@ -511,7 +461,7 @@ function VehicleManagementContent() {
 
       if (supabase) {
         try {
-          // upload image if picked
+          // 1) upload image if picked
           let image_path: string | null = null
           let publicUrl: string | null = null
 
@@ -520,10 +470,11 @@ function VehicleManagementContent() {
             image_path = up.path
             publicUrl = up.publicUrl
           } else if (formData.image) {
-            // preview only; DB stores path, so skip storing URL in DB
+            // user typed a URL (preview only) — DB stores path, so this won't be saved
             publicUrl = formData.image
           }
 
+          // 2) insert DB row
           const payload = {
             registration_number: formData.licensePlate,
             title: formData.name,
@@ -531,41 +482,41 @@ function VehicleManagementContent() {
             model: formData.model,
             year: Number.parseInt(formData.year),
             rental_price: Number.parseFloat(formData.pricePerDay),
-            image_path: image_path,               // DB requires path
+            image_path: image_path, // path relative to bucket
             available: formData.available,
           }
 
           const { data, error } = await supabase.from("vehicles").insert(payload).select().single()
-          if (!error && data) {
-            // map DB row to UI
-            let dbUrl: string | null = publicUrl
-            if (data.image_path && !dbUrl) {
-              const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.image_path)
-              dbUrl = pub?.publicUrl ?? null
-            }
-            const mapped: Vehicle = {
-              id: data.id,
-              name: data.title,
-              brand: data.brand,
-              model: data.model,
-              category: `${data.brand} ${data.model}`,
-              image: dbUrl,
-              pricePerDay: Number(data.rental_price ?? 0),
-              passengers: localNew.passengers,
-              transmission: localNew.transmission,
-              fuel: localNew.fuel,
-              available: Boolean(data.available),
-              description: localNew.description,
-              features: localNew.features,
-              year: Number(data.year ?? 0),
-              licensePlate: data.registration_number ?? "",
-            }
-            setVehicles((prev) => [mapped, ...prev])
-          } else {
-            // optimistic if insert failed
-            setVehicles((prev) => [localNew, ...prev])
+          if (error) throw error
+
+          // 3) resolve display URL if needed
+          let dbUrl: string | null = publicUrl
+          if (data.image_path && !dbUrl) {
+            const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.image_path)
+            dbUrl = pub?.publicUrl ?? null
           }
+
+          // 4) map DB row to UI type
+          const mapped: Vehicle = {
+            id: data.id,
+            name: data.title,
+            brand: data.brand,
+            model: data.model,
+            category: `${data.brand} ${data.model}`,
+            image: dbUrl,
+            pricePerDay: Number(data.rental_price ?? 0),
+            passengers: localNew.passengers,
+            transmission: localNew.transmission,
+            fuel: localNew.fuel,
+            available: Boolean(data.available),
+            description: localNew.description,
+            features: localNew.features,
+            year: Number(data.year ?? 0),
+            licensePlate: data.registration_number ?? "",
+          }
+          setVehicles((prev) => [mapped, ...prev])
         } catch {
+          // optimistic fallback
           setVehicles((prev) => [localNew, ...prev])
         }
       } else {
@@ -583,7 +534,6 @@ function VehicleManagementContent() {
       e.preventDefault()
       if (!editingVehicle) return
 
-      // Upload new file if given
       let newPublicUrl: string | null = editingVehicle.image as string | null
       let newImagePath: string | null = null
 
@@ -597,7 +547,6 @@ function VehicleManagementContent() {
         }
       }
 
-      // Update UI
       const updatedVehicle: Vehicle = {
         ...editingVehicle,
         name: formData.name,
@@ -619,7 +568,7 @@ function VehicleManagementContent() {
       }
       setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)))
 
-      // Persist to DB only the columns that exist
+      // Persist to DB (only DB columns)
       if (supabase && typeof editingVehicle.id === "string") {
         const payload: any = {
           registration_number: updatedVehicle.licensePlate,
@@ -670,7 +619,6 @@ function VehicleManagementContent() {
     setIsEditDialogOpen(true)
   }
 
-  // Unique key helper (handles UUID or local numeric)
   const keyFor = (v: Vehicle) => (typeof v.id === "string" ? v.id : `local-${v.id}-${v.licensePlate}`)
 
   return (
@@ -845,9 +793,7 @@ function VehicleManagementContent() {
                               />
                               <div>
                                 <p className="font-medium text-white">{vehicle.name}</p>
-                                <p className="text-sm text-white/70">
-                                  {vehicle.year}
-                                </p>
+                                <p className="text-sm text-white/70">{vehicle.year}</p>
                               </div>
                             </div>
                           </TableCell>
