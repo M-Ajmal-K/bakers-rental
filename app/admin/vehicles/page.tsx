@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback, memo } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -102,12 +102,224 @@ interface Vehicle {
   licensePlate: string
 }
 
+type FormState = {
+  name: string
+  category: string
+  image: string
+  pricePerDay: string
+  passengers: string
+  transmission: string
+  fuel: string
+  available: boolean
+  description: string
+  features: string
+  year: string
+  licensePlate: string
+}
+
+/* ------------------------ Memoized vehicle form ------------------------ */
+const VehicleForm = memo(function VehicleForm({
+  formData,
+  setFormData,
+  onSubmit,
+  isEdit = false,
+}: {
+  formData: FormState
+  setFormData: React.Dispatch<React.SetStateAction<FormState>>
+  onSubmit: (e: React.FormEvent) => void
+  isEdit?: boolean
+}) {
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="name" className="text-white">Vehicle Name</Label>
+          <Input
+            id="name"
+            placeholder="e.g., Toyota RAV4"
+            value={formData.name}
+            onChange={(e) => setFormData((s) => ({ ...s, name: e.target.value }))}
+            required
+            className="text-white placeholder:text-white/60"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="category" className="text-white">Category</Label>
+          <Select value={formData.category} onValueChange={(value) => setFormData((s) => ({ ...s, category: value }))}>
+            <SelectTrigger className="text-white placeholder:text-white/60">
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map((category) => (
+                <SelectItem key={category} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="pricePerDay" className="text-white">Price per Day ($)</Label>
+          <Input
+            id="pricePerDay"
+            type="number"
+            placeholder="85"
+            value={formData.pricePerDay}
+            onChange={(e) => setFormData((s) => ({ ...s, pricePerDay: e.target.value }))}
+            required
+            className="text-white placeholder:text-white/60"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="passengers" className="text-white">Passengers</Label>
+          <Input
+            id="passengers"
+            type="number"
+            placeholder="5"
+            value={formData.passengers}
+            onChange={(e) => setFormData((s) => ({ ...s, passengers: e.target.value }))}
+            required
+            className="text-white placeholder:text-white/60"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="year" className="text-white">Year</Label>
+          <Input
+            id="year"
+            type="number"
+            placeholder="2023"
+            value={formData.year}
+            onChange={(e) => setFormData((s) => ({ ...s, year: e.target.value }))}
+            required
+            className="text-white placeholder:text-white/60"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="transmission" className="text-white">Transmission</Label>
+          <Select
+            value={formData.transmission}
+            onValueChange={(value) => setFormData((s) => ({ ...s, transmission: value }))}
+          >
+            <SelectTrigger className="text-white placeholder:text-white/60">
+              <SelectValue placeholder="Select transmission" />
+            </SelectTrigger>
+            <SelectContent>
+              {transmissionTypes.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {type}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="fuel" className="text-white">Fuel Type</Label>
+          <Select value={formData.fuel} onValueChange={(value) => setFormData((s) => ({ ...s, fuel: value }))}>
+            <SelectTrigger className="text-white placeholder:text-white/60">
+              <SelectValue placeholder="Select fuel type" />
+            </SelectTrigger>
+            <SelectContent>
+              {fuelTypes.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {type}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="licensePlate" className="text-white">License Plate</Label>
+        <Input
+          id="licensePlate"
+          placeholder="FJ-1234"
+          value={formData.licensePlate}
+          onChange={(e) => setFormData((s) => ({ ...s, licensePlate: e.target.value }))}
+          required
+          className="text-white placeholder:text-white/60"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="image" className="text-white">Image URL</Label>
+        <div className="flex gap-2">
+          <Input
+            id="image"
+            placeholder="https://example.com/image.jpg or /local-image.png"
+            value={formData.image}
+            onChange={(e) => setFormData((s) => ({ ...s, image: e.target.value }))}
+            className="text-white placeholder:text-white/60"
+          />
+          <Button type="button" variant="outline" size="sm">
+            <Upload className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description" className="text-white">Description</Label>
+        <Textarea
+          id="description"
+          placeholder="Brief description of the vehicle..."
+          value={formData.description}
+          onChange={(e) => setFormData((s) => ({ ...s, description: e.target.value }))}
+          rows={3}
+          className="text-white placeholder:text-white/60"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="features" className="text-white">Features (comma-separated)</Label>
+        <Input
+          id="features"
+          placeholder="Air Conditioning, GPS, Bluetooth"
+          value={formData.features}
+          onChange={(e) => setFormData((s) => ({ ...s, features: e.target.value }))}
+          className="text-white placeholder:text-white/60"
+        />
+      </div>
+
+      <div className="flex items-center space-x-2">
+        <input
+          type="checkbox"
+          id="available"
+          checked={formData.available}
+          onChange={(e) => setFormData((s) => ({ ...s, available: e.target.checked }))}
+          className="rounded border-border"
+        />
+        <Label htmlFor="available" className="text-white">Available for booking</Label>
+      </div>
+
+      <div className="flex gap-2 pt-4">
+        <Button type="submit" className="bg-primary hover:bg-primary/90">
+          {isEdit ? "Update Vehicle" : "Add Vehicle"}
+        </Button>
+        <Button type="button" variant="outline">
+          Cancel
+        </Button>
+      </div>
+    </form>
+  )
+})
+
+/* ------------------------ Page content ------------------------ */
 function VehicleManagementContent() {
   const [vehicles, setVehicles] = useState<Vehicle[]>(initialVehicles)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormState>({
     name: "",
     category: "",
     image: "",
@@ -123,13 +335,23 @@ function VehicleManagementContent() {
   })
   const router = useRouter()
 
+  // Make fade-in sections visible (prevents "blank content" if CSS hides until animated)
+  useEffect(() => {
+    const activate = () => {
+      document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
+    }
+    activate()
+    window.addEventListener("scroll", activate)
+    return () => window.removeEventListener("scroll", activate)
+  }, [])
+
   const handleLogout = () => {
     localStorage.removeItem("adminAuth")
     localStorage.removeItem("adminUser")
     router.push("/admin/login")
   }
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormData({
       name: "",
       category: "",
@@ -144,65 +366,71 @@ function VehicleManagementContent() {
       year: "",
       licensePlate: "",
     })
-  }
+  }, [])
 
-  const handleAddVehicle = (e: React.FormEvent) => {
-    e.preventDefault()
-    const newVehicle: Vehicle = {
-      id: Math.max(...vehicles.map((v) => v.id)) + 1,
-      name: formData.name,
-      category: formData.category,
-      image: formData.image || "/placeholder.svg",
-      pricePerDay: Number.parseInt(formData.pricePerDay),
-      passengers: Number.parseInt(formData.passengers),
-      transmission: formData.transmission,
-      fuel: formData.fuel,
-      available: formData.available,
-      description: formData.description,
-      features: formData.features
-        .split(",")
-        .map((f) => f.trim())
-        .filter(Boolean),
-      year: Number.parseInt(formData.year),
-      licensePlate: formData.licensePlate,
-    }
-    setVehicles([...vehicles, newVehicle])
-    setIsAddDialogOpen(false)
-    resetForm()
-  }
+  const handleAddVehicle = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      const newVehicle: Vehicle = {
+        id: Math.max(...vehicles.map((v) => v.id)) + 1,
+        name: formData.name,
+        category: formData.category,
+        image: formData.image || "/placeholder.svg",
+        pricePerDay: Number.parseInt(formData.pricePerDay),
+        passengers: Number.parseInt(formData.passengers),
+        transmission: formData.transmission,
+        fuel: formData.fuel,
+        available: formData.available,
+        description: formData.description,
+        features: formData.features
+          .split(",")
+          .map((f) => f.trim())
+          .filter(Boolean),
+        year: Number.parseInt(formData.year),
+        licensePlate: formData.licensePlate,
+      }
+      setVehicles((prev) => [...prev, newVehicle])
+      setIsAddDialogOpen(false)
+      resetForm()
+    },
+    [formData, resetForm, vehicles],
+  )
 
-  const handleEditVehicle = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingVehicle) return
+  const handleEditVehicle = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      if (!editingVehicle) return
 
-    const updatedVehicle: Vehicle = {
-      ...editingVehicle,
-      name: formData.name,
-      category: formData.category,
-      image: formData.image || editingVehicle.image,
-      pricePerDay: Number.parseInt(formData.pricePerDay),
-      passengers: Number.parseInt(formData.passengers),
-      transmission: formData.transmission,
-      fuel: formData.fuel,
-      available: formData.available,
-      description: formData.description,
-      features: formData.features
-        .split(",")
-        .map((f) => f.trim())
-        .filter(Boolean),
-      year: Number.parseInt(formData.year),
-      licensePlate: formData.licensePlate,
-    }
+      const updatedVehicle: Vehicle = {
+        ...editingVehicle,
+        name: formData.name,
+        category: formData.category,
+        image: formData.image || editingVehicle.image,
+        pricePerDay: Number.parseInt(formData.pricePerDay),
+        passengers: Number.parseInt(formData.passengers),
+        transmission: formData.transmission,
+        fuel: formData.fuel,
+        available: formData.available,
+        description: formData.description,
+        features: formData.features
+          .split(",")
+          .map((f) => f.trim())
+          .filter(Boolean),
+        year: Number.parseInt(formData.year),
+        licensePlate: formData.licensePlate,
+      }
 
-    setVehicles(vehicles.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)))
-    setIsEditDialogOpen(false)
-    setEditingVehicle(null)
-    resetForm()
-  }
+      setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)))
+      setIsEditDialogOpen(false)
+      setEditingVehicle(null)
+      resetForm()
+    },
+    [editingVehicle, formData, resetForm],
+  )
 
   const handleDeleteVehicle = (id: number) => {
     if (confirm("Are you sure you want to delete this vehicle?")) {
-      setVehicles(vehicles.filter((v) => v.id !== id))
+      setVehicles((prev) => prev.filter((v) => v.id !== id))
     }
   }
 
@@ -224,193 +452,6 @@ function VehicleManagementContent() {
     })
     setIsEditDialogOpen(true)
   }
-
-  const VehicleForm = ({ onSubmit, isEdit = false }: { onSubmit: (e: React.FormEvent) => void; isEdit?: boolean }) => (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">Vehicle Name</Label>
-          <Input
-            id="name"
-            placeholder="e.g., Toyota RAV4"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="category">Category</Label>
-          <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
-            <SelectContent>
-              {categories.map((category) => (
-                <SelectItem key={category} value={category}>
-                  {category}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="pricePerDay">Price per Day ($)</Label>
-          <Input
-            id="pricePerDay"
-            type="number"
-            placeholder="85"
-            value={formData.pricePerDay}
-            onChange={(e) => setFormData({ ...formData, pricePerDay: e.target.value })}
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="passengers">Passengers</Label>
-          <Input
-            id="passengers"
-            type="number"
-            placeholder="5"
-            value={formData.passengers}
-            onChange={(e) => setFormData({ ...formData, passengers: e.target.value })}
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="year">Year</Label>
-          <Input
-            id="year"
-            type="number"
-            placeholder="2023"
-            value={formData.year}
-            onChange={(e) => setFormData({ ...formData, year: e.target.value })}
-            required
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="transmission">Transmission</Label>
-          <Select
-            value={formData.transmission}
-            onValueChange={(value) => setFormData({ ...formData, transmission: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select transmission" />
-            </SelectTrigger>
-            <SelectContent>
-              {transmissionTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="fuel">Fuel Type</Label>
-          <Select value={formData.fuel} onValueChange={(value) => setFormData({ ...formData, fuel: value })}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select fuel type" />
-            </SelectTrigger>
-            <SelectContent>
-              {fuelTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="licensePlate">License Plate</Label>
-        <Input
-          id="licensePlate"
-          placeholder="FJ-1234"
-          value={formData.licensePlate}
-          onChange={(e) => setFormData({ ...formData, licensePlate: e.target.value })}
-          required
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="image">Image URL</Label>
-        <div className="flex gap-2">
-          <Input
-            id="image"
-            placeholder="https://example.com/image.jpg or /local-image.png"
-            value={formData.image}
-            onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-          />
-          <Button type="button" variant="outline" size="sm">
-            <Upload className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="description">Description</Label>
-        <Textarea
-          id="description"
-          placeholder="Brief description of the vehicle..."
-          value={formData.description}
-          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-          rows={3}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="features">Features (comma-separated)</Label>
-        <Input
-          id="features"
-          placeholder="Air Conditioning, GPS, Bluetooth"
-          value={formData.features}
-          onChange={(e) => setFormData({ ...formData, features: e.target.value })}
-        />
-      </div>
-
-      <div className="flex items-center space-x-2">
-        <input
-          type="checkbox"
-          id="available"
-          checked={formData.available}
-          onChange={(e) => setFormData({ ...formData, available: e.target.checked })}
-          className="rounded border-border"
-        />
-        <Label htmlFor="available">Available for booking</Label>
-      </div>
-
-      <div className="flex gap-2 pt-4">
-        <Button type="submit" className="bg-primary hover:bg-primary/90">
-          {isEdit ? "Update Vehicle" : "Add Vehicle"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            if (isEdit) {
-              setIsEditDialogOpen(false)
-              setEditingVehicle(null)
-            } else {
-              setIsAddDialogOpen(false)
-            }
-            resetForm()
-          }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
-  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
@@ -458,11 +499,27 @@ function VehicleManagementContent() {
                     Add New Vehicle
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20">
+
+                {/* Keep mounted + soften overlay + blur the background; prevent focus jumps */}
+                <DialogContent
+                  forceMount
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                  onPointerDownOutside={(e) => {
+                    // keep dialog open unless they click the overlay intentionally; remove if not desired
+                    const target = e.target as HTMLElement
+                    if (target.closest("button, input, textarea, [role='combobox']")) {
+                      e.preventDefault()
+                    }
+                  }}
+                  className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+                >
+                  {/* Optional extra overlay softener */}
+                  <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
                   <DialogHeader>
                     <DialogTitle className="text-white text-2xl">Add New Vehicle</DialogTitle>
                   </DialogHeader>
-                  <VehicleForm onSubmit={handleAddVehicle} />
+                  <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleAddVehicle} />
                 </DialogContent>
               </Dialog>
             </div>
@@ -556,11 +613,17 @@ function VehicleManagementContent() {
           </div>
 
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20">
+            <DialogContent
+              forceMount
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+            >
+              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-2xl">Edit Vehicle</DialogTitle>
               </DialogHeader>
-              <VehicleForm onSubmit={handleEditVehicle} isEdit />
+              <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleEditVehicle} isEdit />
             </DialogContent>
           </Dialog>
         </div>

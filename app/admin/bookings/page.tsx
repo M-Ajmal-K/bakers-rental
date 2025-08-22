@@ -1,9 +1,10 @@
 "use client"
 
-import React from "react"
-
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { format } from "date-fns"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,12 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { AdminAuthGuard } from "@/components/admin-auth-guard"
-import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react"
-import Link from "next/link"
-import { format } from "date-fns"
 
-// Mock booking data
+import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react"
+
+// --- Mock booking data ---
 const initialBookings = [
   {
     id: 1,
@@ -106,13 +105,15 @@ const initialBookings = [
   },
 ]
 
-const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"]
+const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const
 const statusColors = {
   pending: "bg-yellow-100 text-yellow-800",
   confirmed: "bg-green-100 text-green-800",
   completed: "bg-blue-100 text-blue-800",
   cancelled: "bg-red-100 text-red-800",
 }
+
+type BookingStatus = typeof bookingStatuses[number]
 
 interface Booking {
   id: number
@@ -127,24 +128,31 @@ interface Booking {
   pickupLocation: string
   dropoffLocation: string
   totalAmount: number
-  status: string
+  status: BookingStatus | string
   createdAt: string
   notes: string
 }
 
 function BookingManagementContent() {
+  const router = useRouter()
   const [bookings, setBookings] = useState<Booking[]>(initialBookings)
   const [filteredBookings, setFilteredBookings] = useState<Booking[]>(initialBookings)
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState<BookingStatus | "all">("all")
   const [searchTerm, setSearchTerm] = useState("")
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
-  const [editFormData, setEditFormData] = useState({
-    status: "",
-    notes: "",
-  })
-  const router = useRouter()
+  const [editFormData, setEditFormData] = useState({ status: "", notes: "" })
+
+  // 👇 Ensure fade-in sections become visible (prevents "invisible until animated" bug)
+  useEffect(() => {
+    const activate = () => {
+      document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
+    }
+    activate()
+    window.addEventListener("scroll", activate)
+    return () => window.removeEventListener("scroll", activate)
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem("adminAuth")
@@ -152,25 +160,19 @@ function BookingManagementContent() {
     router.push("/admin/login")
   }
 
-  // Filter bookings based on status and search term
-  React.useEffect(() => {
+  // Filter bookings on changes
+  useEffect(() => {
     let filtered = bookings
-
-    // Filter by status
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((booking) => booking.status === statusFilter)
-    }
-
-    // Filter by search term (customer name, booking ref, vehicle)
+    if (statusFilter !== "all") filtered = filtered.filter((b) => b.status === statusFilter)
     if (searchTerm) {
+      const q = searchTerm.toLowerCase()
       filtered = filtered.filter(
-        (booking) =>
-          booking.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          booking.bookingRef.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          booking.vehicleName.toLowerCase().includes(searchTerm.toLowerCase()),
+        (b) =>
+          b.customerName.toLowerCase().includes(q) ||
+          b.bookingRef.toLowerCase().includes(q) ||
+          b.vehicleName.toLowerCase().includes(q),
       )
     }
-
     setFilteredBookings(filtered)
   }, [bookings, statusFilter, searchTerm])
 
@@ -181,36 +183,27 @@ function BookingManagementContent() {
 
   const handleEditBooking = (booking: Booking) => {
     setSelectedBooking(booking)
-    setEditFormData({
-      status: booking.status,
-      notes: booking.notes,
-    })
+    setEditFormData({ status: String(booking.status), notes: booking.notes })
     setIsEditDialogOpen(true)
   }
 
   const handleUpdateBooking = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedBooking) return
-
-    const updatedBooking = {
-      ...selectedBooking,
-      status: editFormData.status,
-      notes: editFormData.notes,
-    }
-
-    setBookings(bookings.map((b) => (b.id === selectedBooking.id ? updatedBooking : b)))
+    const updated = { ...selectedBooking, status: editFormData.status, notes: editFormData.notes }
+    setBookings((prev) => prev.map((b) => (b.id === selectedBooking.id ? updated : b)))
     setIsEditDialogOpen(false)
     setSelectedBooking(null)
   }
 
   const handleDeleteBooking = (id: number) => {
     if (confirm("Are you sure you want to delete this booking?")) {
-      setBookings(bookings.filter((b) => b.id !== id))
+      setBookings((prev) => prev.filter((b) => b.id !== id))
     }
   }
 
   const getStatusBadge = (status: string) => {
-    const colorClass = statusColors[status as keyof typeof statusColors] || "bg-gray-100 text-gray-800"
+    const colorClass = (statusColors as any)[status] || "bg-gray-100 text-gray-800"
     return (
       <Badge className={`${colorClass} capitalize`} variant="secondary">
         {status}
@@ -220,10 +213,10 @@ function BookingManagementContent() {
 
   const calculateDays = (pickupDate: string, returnDate: string) => {
     const pickup = new Date(pickupDate)
-    const returnD = new Date(returnDate)
-    const diffTime = Math.abs(returnD.getTime() - pickup.getTime())
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    return diffDays || 1
+    const ret = new Date(returnDate)
+    const diff = Math.abs(ret.getTime() - pickup.getTime())
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
+    return days || 1
   }
 
   return (
@@ -231,17 +224,15 @@ function BookingManagementContent() {
       <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/admin/dashboard" className="flex items-center space-x-3 group">
-                <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                  <Car className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <span className="text-2xl font-bold text-white">Bakers Rentals</span>
-                  <p className="text-white/80 text-sm">Booking Management</p>
-                </div>
-              </Link>
-            </div>
+            <Link href="/admin/dashboard" className="flex items-center space-x-3 group">
+              <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                <Car className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <span className="text-2xl font-bold text-white">Bakers Rentals</span>
+                <p className="text-white/80 text-sm">Booking Management</p>
+              </div>
+            </Link>
             <Button
               variant="outline"
               size="sm"
@@ -262,6 +253,7 @@ function BookingManagementContent() {
             <p className="text-white/80 text-xl">View and manage customer reservations</p>
           </div>
 
+          {/* Filters */}
           <div className="fade-in-up mb-8" style={{ animationDelay: "0.2s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
               <CardHeader>
@@ -288,9 +280,9 @@ function BookingManagementContent() {
                     <Label htmlFor="status" className="text-white/80 font-medium">
                       Status Filter
                     </Label>
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as BookingStatus | "all")}>
                       <SelectTrigger className="mt-2 btn-3d glass-effect-dark text-white border-white/20">
-                        <SelectValue />
+                        <SelectValue placeholder="All Statuses" />
                       </SelectTrigger>
                       <SelectContent className="glass-effect-dark border-white/20">
                         {bookingStatuses.map((status) => (
@@ -306,6 +298,7 @@ function BookingManagementContent() {
             </Card>
           </div>
 
+          {/* Table */}
           <div className="fade-in-up" style={{ animationDelay: "0.4s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
               <CardHeader>
@@ -358,13 +351,7 @@ function BookingManagementContent() {
                             </div>
                           </TableCell>
                           <TableCell className="font-medium text-white">${booking.totalAmount}</TableCell>
-                          <TableCell>
-                            <Badge
-                              className={`${statusColors[booking.status as keyof typeof statusColors]} capitalize border-0`}
-                            >
-                              {booking.status}
-                            </Badge>
-                          </TableCell>
+                          <TableCell>{getStatusBadge(String(booking.status))}</TableCell>
                           <TableCell>
                             <div className="flex items-center space-x-2">
                               <Button
@@ -410,6 +397,7 @@ function BookingManagementContent() {
             </Card>
           </div>
 
+          {/* View Dialog */}
           <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
             <DialogContent className="max-w-2xl glass-effect-dark border-white/20">
               <DialogHeader>
@@ -425,12 +413,7 @@ function BookingManagementContent() {
                           <span className="text-white/70">Reference:</span> {selectedBooking.bookingRef}
                         </p>
                         <p>
-                          <span className="text-white/70">Status:</span>{" "}
-                          <Badge
-                            className={`${statusColors[selectedBooking.status as keyof typeof statusColors]} capitalize border-0`}
-                          >
-                            {selectedBooking.status}
-                          </Badge>
+                          <span className="text-white/70">Status:</span> {getStatusBadge(String(selectedBooking.status))}
                         </p>
                         <p>
                           <span className="text-white/70">Created:</span>{" "}
@@ -507,6 +490,7 @@ function BookingManagementContent() {
             </DialogContent>
           </Dialog>
 
+          {/* Edit Dialog */}
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             <DialogContent className="glass-effect-dark border-white/20">
               <DialogHeader>
@@ -523,7 +507,7 @@ function BookingManagementContent() {
                       onValueChange={(value) => setEditFormData({ ...editFormData, status: value })}
                     >
                       <SelectTrigger className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10">
-                        <SelectValue />
+                        <SelectValue placeholder="Choose status" />
                       </SelectTrigger>
                       <SelectContent className="glass-effect-dark border-white/20">
                         <SelectItem value="pending" className="text-white hover:bg-white/10">
@@ -581,10 +565,28 @@ function BookingManagementContent() {
   )
 }
 
+// -------- Default export with built-in auth check (replaces AdminAuthGuard) --------
 export default function BookingManagementPage() {
-  return (
-    <AdminAuthGuard>
-      <BookingManagementContent />
-    </AdminAuthGuard>
-  )
+  const router = useRouter()
+  const [ready, setReady] = useState(false)
+  const [authed, setAuthed] = useState(false)
+
+  useEffect(() => {
+    // Client-only check
+    const ok = typeof window !== "undefined" && localStorage.getItem("adminAuth") === "true"
+    setAuthed(ok)
+    setReady(true)
+    if (!ok) router.replace("/admin/login")
+  }, [router])
+
+  if (!ready) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">
+        Checking admin session…
+      </div>
+    )
+  }
+  if (!authed) return null
+
+  return <BookingManagementContent />
 }
