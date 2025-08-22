@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AdminAuthGuard } from "@/components/admin-auth-guard"
 import { Car, Plus, Edit, Trash2, Upload, LogOut, AlertTriangle } from "lucide-react"
@@ -23,11 +23,12 @@ import Image from "next/image"
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
+
+// Use your existing bucket name consistently
 const STORAGE_BUCKET = "vehicle-photos"
 
 // Warn loudly if env missing
 if (!supabase) {
-  // This renders only client-side; it’s fine to log here
   // eslint-disable-next-line no-console
   console.warn(
     "[Vehicles] Supabase client is NOT configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY and redeploy."
@@ -49,6 +50,7 @@ interface Vehicle {
   model: string          // DB
   category?: string      // derived display
   image: string | null   // public URL from storage path
+  imagePath?: string | null // storage relative path for removals/updates
   pricePerDay: number    // DB: rental_price
   passengers: number     // UI-only
   transmission: string   // UI-only
@@ -67,7 +69,6 @@ type FormState = {
   pricePerDay: string     // rental_price
   year: string
   licensePlate: string
-  image: string           // optional URL (preview only)
   passengers: string
   transmission: string
   fuel: string
@@ -188,22 +189,15 @@ const VehicleForm = memo(function VehicleForm({
         </div>
       </div>
 
-      {/* Upload takes precedence over URL if provided */}
+      {/* Upload only (no paste-URL path) */}
       <div className="space-y-1.5 sm:space-y-2">
         <Label htmlFor="image" className="text-white text-sm sm:text-base">Vehicle Image</Label>
         <div className="flex gap-2">
-          <Input
-            id="image"
-            placeholder="(Optional) Image URL — upload preferred"
-            value={formData.image}
-            onChange={(e) => setFormData((s) => ({ ...s, image: e.target.value }))}
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
           <input
             type="file"
             accept="image/*"
             className="hidden"
-            ref={uploadRef}
+            id="image-upload-input"
             onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)}
           />
           <Button
@@ -211,11 +205,12 @@ const VehicleForm = memo(function VehicleForm({
             variant="outline"
             size="sm"
             className="shrink-0"
-            onClick={() => uploadRef.current?.click()}
+            onClick={() => document.getElementById("image-upload-input")?.click()}
             title="Upload image from your device"
           >
             <Upload className="h-4 w-4" />
           </Button>
+          <span className="text-white/70 text-sm self-center">PNG/JPG/WEBP up to 10MB</span>
         </div>
       </div>
 
@@ -313,7 +308,6 @@ function VehicleManagementContent() {
     name: "",
     brand: "",
     model: "",
-    image: "",
     pricePerDay: "",
     passengers: "",
     transmission: "",
@@ -375,6 +369,7 @@ function VehicleManagementContent() {
           model: v.model,
           category: `${v.brand} ${v.model}`,
           image: publicUrl,
+          imagePath: v.image_path ?? null,
           pricePerDay: Number(v.rental_price ?? 0),
           passengers: 5, // UI defaults
           transmission: "Automatic",
@@ -403,7 +398,6 @@ function VehicleManagementContent() {
       name: "",
       brand: "",
       model: "",
-      image: "",
       pricePerDay: "",
       passengers: "",
       transmission: "",
@@ -420,7 +414,7 @@ function VehicleManagementContent() {
   // Upload image file to Supabase Storage and return { publicUrl, path }
   const uploadImage = useCallback(async (file: File) => {
     if (!supabase) return { publicUrl: "", path: "" }
-    const ext = file.name.split(".").pop() || "jpg"
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase()
     const fileName = `${crypto.randomUUID()}.${ext}`
     const path = `vehicles/${fileName}`
 
@@ -457,11 +451,8 @@ function VehicleManagementContent() {
           const up = await uploadImage(pickedFile)
           image_path = up.path
           publicUrl = up.publicUrl
-        } else if (formData.image) {
-          // typed URL for preview only
-          publicUrl = formData.image
         }
-      } catch (err) {
+      } catch {
         alert("Image upload failed. See console for details.")
         return
       }
@@ -507,6 +498,7 @@ function VehicleManagementContent() {
         model: data.model,
         category: `${data.brand} ${data.model}`,
         image: dbUrl,
+        imagePath: data.image_path ?? null,
         pricePerDay: Number(data.rental_price ?? 0),
         passengers: Number.parseInt(formData.passengers || "5"),
         transmission: formData.transmission || "Automatic",
@@ -578,6 +570,7 @@ function VehicleManagementContent() {
         model: formData.model,
         category: `${formData.brand} ${formData.model}`,
         image: newPublicUrl || editingVehicle.image || "/placeholder.svg",
+        imagePath: newImagePath ?? editingVehicle.imagePath ?? null,
         pricePerDay: Number.parseFloat(formData.pricePerDay),
         passengers: Number.parseInt(formData.passengers || "5"),
         transmission: formData.transmission || "Automatic",
@@ -602,6 +595,7 @@ function VehicleManagementContent() {
       alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
       return
     }
+    const victim = vehicles.find((v) => v.id === id)
     if (!confirm("Are you sure you want to delete this vehicle?")) return
     const { error } = await supabase.from("vehicles").delete().eq("id", id)
     if (error) {
@@ -610,6 +604,16 @@ function VehicleManagementContent() {
       alert(`Failed to delete vehicle: ${error.message}`)
       return
     }
+
+    // Best-effort: remove image from storage
+    if (victim?.imagePath) {
+      const { error: rmErr } = await supabase.storage.from(STORAGE_BUCKET).remove([victim.imagePath])
+      if (rmErr) {
+        // eslint-disable-next-line no-console
+        console.warn("[Vehicles] Storage remove warning:", rmErr.message)
+      }
+    }
+
     setVehicles((prev) => prev.filter((v) => v.id !== id))
   }
 
@@ -619,7 +623,6 @@ function VehicleManagementContent() {
       name: vehicle.name,
       brand: vehicle.brand,
       model: vehicle.model,
-      image: (vehicle.image as string) || "",
       pricePerDay: vehicle.pricePerDay.toString(),
       passengers: String(vehicle.passengers || 5),
       transmission: vehicle.transmission || "Automatic",
@@ -695,6 +698,7 @@ function VehicleManagementContent() {
 
                 <DialogContent
                   forceMount
+                  aria-describedby="add-vehicle-desc"
                   onOpenAutoFocus={(e) => e.preventDefault()}
                   onCloseAutoFocus={(e) => e.preventDefault()}
                   className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
@@ -702,6 +706,9 @@ function VehicleManagementContent() {
                   <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
                   <DialogHeader>
                     <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
+                    <DialogDescription id="add-vehicle-desc" className="text-white/80">
+                      Upload a photo and fill in the vehicle details. All fields marked * are required.
+                    </DialogDescription>
                   </DialogHeader>
                   <VehicleForm
                     formData={formData}
@@ -869,6 +876,7 @@ function VehicleManagementContent() {
           <Dialog open={isEditDialogOpen} onOpenChange={(o) => { setIsEditDialogOpen(o); if (!o) resetForm() }}>
             <DialogContent
               forceMount
+              aria-describedby="edit-vehicle-desc"
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
               className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
@@ -876,6 +884,9 @@ function VehicleManagementContent() {
               <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
+                <DialogDescription id="edit-vehicle-desc" className="text-white/80">
+                  Update details or upload a new photo for this vehicle.
+                </DialogDescription>
               </DialogHeader>
               <VehicleForm
                 formData={formData}
