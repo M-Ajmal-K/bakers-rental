@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AdminAuthGuard } from "@/components/admin-auth-guard"
-import { Car, Plus, Edit, Trash2, Upload, LogOut } from "lucide-react"
+import { Car, Plus, Edit, Trash2, Upload, LogOut, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 
@@ -25,25 +25,17 @@ const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
 const STORAGE_BUCKET = "vehicle-images"
 
-// ---- Fallback mock (only used if Supabase env not provided) ----
-const initialVehicles = [
-  {
-    id: 1,
-    name: "Toyota RAV4",
-    brand: "Toyota",
-    model: "RAV4",
-    image: "/placeholder-7vroz.png",
-    pricePerDay: 85,
-    passengers: 5,
-    transmission: "Automatic",
-    fuel: "Petrol",
-    available: true,
-    description: "Reliable SUV perfect for family adventures",
-    features: ["Air Conditioning", "GPS", "Bluetooth"],
-    year: 2022,
-    licensePlate: "FJ-1234",
-  },
-]
+// Warn loudly if env missing
+if (!supabase) {
+  // This renders only client-side; it’s fine to log here
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[Vehicles] Supabase client is NOT configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY and redeploy."
+  )
+}
+
+// ---- No mock list by default; we fetch from DB. ----
+const initialVehicles: Vehicle[] = []
 
 const transmissionTypes = ["Automatic", "Manual"]
 const fuelTypes = ["Petrol", "Diesel", "Hybrid", "Electric"]
@@ -347,10 +339,10 @@ function VehicleManagementContent() {
     return () => window.removeEventListener("scroll", activate)
   }, [])
 
-  // Load vehicles from Supabase (fallback to mock on error or if client missing)
+  // Load vehicles from Supabase (no mock fallback; if missing client, we show notice)
   useEffect(() => {
     const load = async () => {
-      if (!supabase) return // stay on mock if env not provided
+      if (!supabase) return
 
       const { data, error } = await supabase
         .from("vehicles")
@@ -359,7 +351,16 @@ function VehicleManagementContent() {
         )
         .order("created_at", { ascending: false })
 
-      if (error || !data) return
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("[Vehicles] Supabase select error:", error)
+        return
+      }
+      if (!data) {
+        // eslint-disable-next-line no-console
+        console.error("[Vehicles] Supabase select returned no data.")
+        return
+      }
 
       const mapped: Vehicle[] = data.map((v: any) => {
         let publicUrl: string | null = null
@@ -428,7 +429,11 @@ function VehicleManagementContent() {
       upsert: false,
       contentType: file.type || "image/jpeg",
     })
-    if (uploadErr) throw uploadErr
+    if (uploadErr) {
+      // eslint-disable-next-line no-console
+      console.error("[Vehicles] Storage upload error:", uploadErr)
+      throw uploadErr
+    }
 
     const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path)
     return { publicUrl: pub?.publicUrl || "", path }
@@ -438,95 +443,86 @@ function VehicleManagementContent() {
     async (e: React.FormEvent) => {
       e.preventDefault()
 
-      // Prepare optimistic entry for UI
-      const localNew: Vehicle = {
-        id: Math.max(0, ...vehicles.map((v) => (typeof v.id === "number" ? v.id : 0))) + 1,
-        name: formData.name,
+      if (!supabase) {
+        alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
+        return
+      }
+
+      // 1) upload image if picked
+      let image_path: string | null = null
+      let publicUrl: string | null = null
+
+      try {
+        if (pickedFile) {
+          const up = await uploadImage(pickedFile)
+          image_path = up.path
+          publicUrl = up.publicUrl
+        } else if (formData.image) {
+          // typed URL for preview only
+          publicUrl = formData.image
+        }
+      } catch (err) {
+        alert("Image upload failed. See console for details.")
+        return
+      }
+
+      // 2) insert DB row
+      const payload = {
+        registration_number: formData.licensePlate,
+        title: formData.name,
         brand: formData.brand,
         model: formData.model,
-        category: `${formData.brand} ${formData.model}`,
-        image: formData.image || "/placeholder.svg",
-        pricePerDay: Number.parseFloat(formData.pricePerDay),
+        year: Number.parseInt(formData.year),
+        rental_price: Number.parseFloat(formData.pricePerDay),
+        image_path: image_path, // path relative to bucket
+        available: formData.available,
+      }
+
+      const { data, error } = await supabase.from("vehicles").insert(payload).select().single()
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("[Vehicles] Supabase insert error:", error)
+        alert(`Failed to save vehicle: ${error.message}`)
+        return
+      }
+      if (!data) {
+        // eslint-disable-next-line no-console
+        console.error("[Vehicles] Supabase insert returned no data.")
+        alert("Vehicle was not saved. Please try again.")
+        return
+      }
+
+      // 3) resolve display URL if needed
+      let dbUrl: string | null = publicUrl
+      if (data.image_path && !dbUrl) {
+        const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.image_path)
+        dbUrl = pub?.publicUrl ?? null
+      }
+
+      // 4) map DB row to UI type
+      const mapped: Vehicle = {
+        id: data.id,
+        name: data.title,
+        brand: data.brand,
+        model: data.model,
+        category: `${data.brand} ${data.model}`,
+        image: dbUrl,
+        pricePerDay: Number(data.rental_price ?? 0),
         passengers: Number.parseInt(formData.passengers || "5"),
         transmission: formData.transmission || "Automatic",
         fuel: formData.fuel || "Petrol",
-        available: formData.available,
-        description: formData.description,
-        features: formData.features
-          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : [],
-        year: Number.parseInt(formData.year),
-        licensePlate: formData.licensePlate,
+        available: Boolean(data.available),
+        description: formData.description || "",
+        features: formData.features ? formData.features.split(",").map((f) => f.trim()).filter(Boolean) : [],
+        year: Number(data.year ?? 0),
+        licensePlate: data.registration_number ?? "",
       }
-
-      if (supabase) {
-        try {
-          // 1) upload image if picked
-          let image_path: string | null = null
-          let publicUrl: string | null = null
-
-          if (pickedFile) {
-            const up = await uploadImage(pickedFile)
-            image_path = up.path
-            publicUrl = up.publicUrl
-          } else if (formData.image) {
-            // user typed a URL (preview only) — DB stores path, so this won't be saved
-            publicUrl = formData.image
-          }
-
-          // 2) insert DB row
-          const payload = {
-            registration_number: formData.licensePlate,
-            title: formData.name,
-            brand: formData.brand,
-            model: formData.model,
-            year: Number.parseInt(formData.year),
-            rental_price: Number.parseFloat(formData.pricePerDay),
-            image_path: image_path, // path relative to bucket
-            available: formData.available,
-          }
-
-          const { data, error } = await supabase.from("vehicles").insert(payload).select().single()
-          if (error) throw error
-
-          // 3) resolve display URL if needed
-          let dbUrl: string | null = publicUrl
-          if (data.image_path && !dbUrl) {
-            const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.image_path)
-            dbUrl = pub?.publicUrl ?? null
-          }
-
-          // 4) map DB row to UI type
-          const mapped: Vehicle = {
-            id: data.id,
-            name: data.title,
-            brand: data.brand,
-            model: data.model,
-            category: `${data.brand} ${data.model}`,
-            image: dbUrl,
-            pricePerDay: Number(data.rental_price ?? 0),
-            passengers: localNew.passengers,
-            transmission: localNew.transmission,
-            fuel: localNew.fuel,
-            available: Boolean(data.available),
-            description: localNew.description,
-            features: localNew.features,
-            year: Number(data.year ?? 0),
-            licensePlate: data.registration_number ?? "",
-          }
-          setVehicles((prev) => [mapped, ...prev])
-        } catch {
-          // optimistic fallback
-          setVehicles((prev) => [localNew, ...prev])
-        }
-      } else {
-        setVehicles((prev) => [localNew, ...prev])
-      }
+      setVehicles((prev) => [mapped, ...prev])
 
       setIsAddDialogOpen(false)
       resetForm()
     },
-    [formData, pickedFile, resetForm, uploadImage, vehicles],
+    [formData, pickedFile, resetForm, uploadImage],
   )
 
   const handleEditVehicle = useCallback(
@@ -534,19 +530,47 @@ function VehicleManagementContent() {
       e.preventDefault()
       if (!editingVehicle) return
 
+      if (!supabase) {
+        alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
+        return
+      }
+
       let newPublicUrl: string | null = editingVehicle.image as string | null
       let newImagePath: string | null = null
 
-      if (supabase && pickedFile) {
+      if (pickedFile) {
         try {
           const up = await uploadImage(pickedFile)
           newPublicUrl = up.publicUrl
           newImagePath = up.path
-        } catch {
-          // keep existing URL if upload fails
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("[Vehicles] Storage upload error (edit):", err)
+          alert("Image upload failed. Keeping previous image.")
         }
       }
 
+      // Persist to DB (only DB columns)
+      const payload: any = {
+        registration_number: formData.licensePlate,
+        title: formData.name,
+        brand: formData.brand,
+        model: formData.model,
+        year: Number.parseInt(formData.year),
+        rental_price: Number.parseFloat(formData.pricePerDay),
+        available: formData.available,
+      }
+      if (newImagePath) payload.image_path = newImagePath
+
+      const { error } = await supabase.from("vehicles").update(payload).eq("id", editingVehicle.id)
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("[Vehicles] Supabase update error:", error)
+        alert(`Failed to update vehicle: ${error.message}`)
+        return
+      }
+
+      // Update UI only after successful DB update
       const updatedVehicle: Vehicle = {
         ...editingVehicle,
         name: formData.name,
@@ -559,29 +583,12 @@ function VehicleManagementContent() {
         transmission: formData.transmission || "Automatic",
         fuel: formData.fuel || "Petrol",
         available: formData.available,
-        description: formData.description,
-        features: formData.features
-          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : [],
+        description: formData.description || "",
+        features: formData.features ? formData.features.split(",").map((f) => f.trim()).filter(Boolean) : [],
         year: Number.parseInt(formData.year),
         licensePlate: formData.licensePlate,
       }
       setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)))
-
-      // Persist to DB (only DB columns)
-      if (supabase && typeof editingVehicle.id === "string") {
-        const payload: any = {
-          registration_number: updatedVehicle.licensePlate,
-          title: updatedVehicle.name,
-          brand: updatedVehicle.brand,
-          model: updatedVehicle.model,
-          year: updatedVehicle.year,
-          rental_price: updatedVehicle.pricePerDay,
-          available: updatedVehicle.available,
-        }
-        if (newImagePath) payload.image_path = newImagePath
-        await supabase.from("vehicles").update(payload).eq("id", editingVehicle.id)
-      }
 
       setIsEditDialogOpen(false)
       setEditingVehicle(null)
@@ -591,11 +598,19 @@ function VehicleManagementContent() {
   )
 
   const handleDeleteVehicle = async (id: VehicleId) => {
-    if (!confirm("Are you sure you want to delete this vehicle?")) return
-    setVehicles((prev) => prev.filter((v) => v.id !== id))
-    if (supabase && typeof id === "string") {
-      await supabase.from("vehicles").delete().eq("id", id)
+    if (!supabase) {
+      alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
+      return
     }
+    if (!confirm("Are you sure you want to delete this vehicle?")) return
+    const { error } = await supabase.from("vehicles").delete().eq("id", id)
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[Vehicles] Supabase delete error:", error)
+      alert(`Failed to delete vehicle: ${error.message}`)
+      return
+    }
+    setVehicles((prev) => prev.filter((v) => v.id !== id))
   }
 
   const openEditDialog = (vehicle: Vehicle) => {
@@ -649,6 +664,16 @@ function VehicleManagementContent() {
           </div>
         </div>
       </nav>
+
+      {!supabase && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 px-4 py-3">
+          <div className="container mx-auto max-w-7xl flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            Supabase is not configured. Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+            <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment and redeploy.
+          </div>
+        </div>
+      )}
 
       <section className="py-8 sm:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
