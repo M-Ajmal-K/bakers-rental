@@ -131,23 +131,23 @@ const VehicleForm = memo(function VehicleForm({
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="name" className="text-white">Vehicle Name</Label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="name" className="text-white text-sm sm:text-base">Vehicle Name</Label>
           <Input
             id="name"
             placeholder="e.g., Toyota RAV4"
             value={formData.name}
             onChange={(e) => setFormData((s) => ({ ...s, name: e.target.value }))}
             required
-            className="text-white placeholder:text-white/60"
+            className="text-white placeholder:text-white/60 h-10 sm:h-11"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="category" className="text-white">Category</Label>
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="category" className="text-white text-sm sm:text-base">Category</Label>
           <Select value={formData.category} onValueChange={(value) => setFormData((s) => ({ ...s, category: value }))}>
-            <SelectTrigger className="text-white placeholder:text-white/60">
+            <SelectTrigger className="text-white placeholder:text-white/60 h-10 sm:h-11">
               <SelectValue placeholder="Select category" />
             </SelectTrigger>
             <SelectContent>
@@ -161,9 +161,9 @@ const VehicleForm = memo(function VehicleForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="pricePerDay" className="text-white">Price per Day ($)</Label>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="pricePerDay" className="text-white text-sm sm:text-base">Price per Day ($)</Label>
           <Input
             id="pricePerDay"
             type="number"
@@ -171,12 +171,12 @@ const VehicleForm = memo(function VehicleForm({
             value={formData.pricePerDay}
             onChange={(e) => setFormData((s) => ({ ...s, pricePerDay: e.target.value }))}
             required
-            className="text-white placeholder:text-white/60"
+            className="text-white placeholder:text-white/60 h-10 sm:h-11"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="passengers" className="text-white">Passengers</Label>
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="passengers" className="text-white text-sm sm:text-base">Passengers</Label>
           <Input
             id="passengers"
             type="number"
@@ -184,12 +184,12 @@ const VehicleForm = memo(function VehicleForm({
             value={formData.passengers}
             onChange={(e) => setFormData((s) => ({ ...s, passengers: e.target.value }))}
             required
-            className="text-white placeholder:text-white/60"
+            className="text-white placeholder:text-white/60 h-10 sm:h-11"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="year" className="text-white">Year</Label>
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="year" className="text-white text-sm sm:text-base">Year</Label>
           <Input
             id="year"
             type="number"
@@ -197,19 +197,19 @@ const VehicleForm = memo(function VehicleForm({
             value={formData.year}
             onChange={(e) => setFormData((s) => ({ ...s, year: e.target.value }))}
             required
-            className="text-white placeholder:text-white/60"
+            className="text-white placeholder:text-white/60 h-10 sm:h-11"
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="transmission" className="text-white">Transmission</Label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="transmission" className="text-white text-sm sm:text-base">Transmission</Label>
           <Select
             value={formData.transmission}
             onValueChange={(value) => setFormData((s) => ({ ...s, transmission: value }))}
           >
-            <SelectTrigger className="text-white placeholder:text-white/60">
+            <SelectTrigger className="text-white placeholder:text-white/60 h-10 sm:h-11">
               <SelectValue placeholder="Select transmission" />
             </SelectTrigger>
             <SelectContent>
@@ -222,10 +222,10 @@ const VehicleForm = memo(function VehicleForm({
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="fuel" className="text-white">Fuel Type</Label>
+        <div className="space-y-1.5 sm:space-y-2">
+          <Label htmlFor="fuel" className="text-white text-sm sm:text-base">Fuel Type</Label>
           <Select value={formData.fuel} onValueChange={(value) => setFormData((s) => ({ ...s, fuel: value }))}>
-            <SelectTrigger className="text-white placeholder:text-white/60">
+            <SelectTrigger className="text-white placeholder:text-white/60 h-10 sm:h-11">
               <SelectValue placeholder="Select fuel type" />
             </SelectTrigger>
             <SelectContent>
@@ -239,36 +239,36 @@ const VehicleForm = memo(function VehicleForm({
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="licensePlate" className="text-white">License Plate</Label>
+      <div className="space-y-1.5 sm:space-y-2">
+        <Label htmlFor="licensePlate" className="text-white text-sm sm:text-base">License Plate</Label>
         <Input
           id="licensePlate"
           placeholder="FJ-1234"
           value={formData.licensePlate}
           onChange={(e) => setFormData((s) => ({ ...s, licensePlate: e.target.value }))}
           required
-          className="text-white placeholder:text-white/60"
+          className="text-white placeholder:text-white/60 h-10 sm:h-11"
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="image" className="text-white">Image URL</Label>
+      <div className="space-y-1.5 sm:space-y-2">
+        <Label htmlFor="image" className="text-white text-sm sm:text-base">Image URL</Label>
         <div className="flex gap-2">
           <Input
             id="image"
             placeholder="https://example.com/image.jpg or /local-image.png"
             value={formData.image}
             onChange={(e) => setFormData((s) => ({ ...s, image: e.target.value }))}
-            className="text-white placeholder:text-white/60"
+            className="text-white placeholder:text-white/60 h-10 sm:h-11"
           />
-          <Button type="button" variant="outline" size="sm">
+          <Button type="button" variant="outline" size="sm" className="shrink-0">
             <Upload className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="description" className="text-white">Description</Label>
+      <div className="space-y-1.5 sm:space-y-2">
+        <Label htmlFor="description" className="text-white text-sm sm:text-base">Description</Label>
         <Textarea
           id="description"
           placeholder="Brief description of the vehicle..."
@@ -279,14 +279,14 @@ const VehicleForm = memo(function VehicleForm({
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="features" className="text-white">Features (comma-separated)</Label>
+      <div className="space-y-1.5 sm:space-y-2">
+        <Label htmlFor="features" className="text-white text-sm sm:text-base">Features (comma-separated)</Label>
         <Input
           id="features"
           placeholder="Air Conditioning, GPS, Bluetooth"
           value={formData.features}
           onChange={(e) => setFormData((s) => ({ ...s, features: e.target.value }))}
-          className="text-white placeholder:text-white/60"
+          className="text-white placeholder:text-white/60 h-10 sm:h-11"
         />
       </div>
 
@@ -298,14 +298,14 @@ const VehicleForm = memo(function VehicleForm({
           onChange={(e) => setFormData((s) => ({ ...s, available: e.target.checked }))}
           className="rounded border-border"
         />
-        <Label htmlFor="available" className="text-white">Available for booking</Label>
+        <Label htmlFor="available" className="text-white text-sm sm:text-base">Available for booking</Label>
       </div>
 
-      <div className="flex gap-2 pt-4">
-        <Button type="submit" className="bg-primary hover:bg-primary/90">
+      <div className="flex gap-2 pt-2 sm:pt-4">
+        <Button type="submit" className="bg-primary hover:bg-primary/90 h-10 sm:h-11 px-4 sm:px-5">
           {isEdit ? "Update Vehicle" : "Add Vehicle"}
         </Button>
-        <Button type="button" variant="outline">
+        <Button type="button" variant="outline" className="h-10 sm:h-11 px-4 sm:px-5">
           Cancel
         </Button>
       </div>
@@ -456,16 +456,16 @@ function VehicleManagementContent() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
       <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/admin/dashboard" className="flex items-center space-x-3 group">
-                <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                  <Car className="h-6 w-6 text-white" />
+            <div className="flex items-center space-x-3 sm:space-x-4">
+              <Link href="/admin/dashboard" className="flex items-center space-x-2 sm:space-x-3 group">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                  <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
                 <div>
-                  <span className="text-2xl font-bold text-white">Bakers Rentals</span>
-                  <p className="text-white/80 text-sm">Vehicle Management</p>
+                  <span className="text-xl sm:text-2xl font-bold text-white">Bakers Rentals</span>
+                  <p className="text-white/80 text-xs sm:text-sm">Vehicle Management</p>
                 </div>
               </Link>
             </div>
@@ -473,51 +473,46 @@ function VehicleManagementContent() {
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent"
+              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent h-9 px-3"
             >
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
+              <LogOut className="h-4 w-4 mr-1.5" />
+              <span className="hidden sm:inline">Logout</span>
             </Button>
           </div>
         </div>
       </nav>
 
-      <section className="py-12 px-4">
+      <section className="py-8 sm:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
-          <div className="flex items-center justify-between mb-12">
+          <div className="flex items-center justify-between mb-6 sm:mb-12">
             <div className="fade-in-up">
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-lg">
+              <h1 className="text-2xl sm:text-5xl font-bold text-white mb-2 sm:mb-4 drop-shadow-lg">
                 Vehicle Fleet Management
               </h1>
-              <p className="text-white/80 text-xl">Manage your premium vehicle collection</p>
+              <p className="text-white/80 text-sm sm:text-xl">Manage your premium vehicle collection</p>
             </div>
             <div className="fade-in-up" style={{ animationDelay: "0.2s" }}>
               <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 text-lg px-8 py-6 font-bold">
-                    <Plus className="h-5 w-5 mr-2" />
-                    Add New Vehicle
+                  {/* Smaller on mobile, full size on md+ */}
+                  <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg">
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2" />
+                    <span>Add Vehicle</span>
+                    <span className="hidden sm:inline">&nbsp;New</span>
                   </Button>
                 </DialogTrigger>
 
-                {/* Keep mounted + soften overlay + blur the background; prevent focus jumps */}
+                {/* Keep mounted + blur background; prevent focus jumps */}
                 <DialogContent
                   forceMount
                   onOpenAutoFocus={(e) => e.preventDefault()}
                   onCloseAutoFocus={(e) => e.preventDefault()}
-                  onPointerDownOutside={(e) => {
-                    // keep dialog open unless they click the overlay intentionally; remove if not desired
-                    const target = e.target as HTMLElement
-                    if (target.closest("button, input, textarea, [role='combobox']")) {
-                      e.preventDefault()
-                    }
-                  }}
-                  className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+                  className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
                 >
-                  {/* Optional extra overlay softener */}
+                  {/* Soft overlay boost */}
                   <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
                   <DialogHeader>
-                    <DialogTitle className="text-white text-2xl">Add New Vehicle</DialogTitle>
+                    <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
                   </DialogHeader>
                   <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleAddVehicle} />
                 </DialogContent>
@@ -525,7 +520,86 @@ function VehicleManagementContent() {
             </div>
           </div>
 
-          <div className="fade-in-up" style={{ animationDelay: "0.4s" }}>
+          {/* Mobile list (no horizontal scroll) */}
+          <div className="space-y-3 sm:hidden">
+            {vehicles.map((vehicle) => (
+              <Card key={vehicle.id} className="glass-effect-dark border-white/10">
+                <CardContent className="p-3">
+                  <div className="flex gap-3">
+                    <Image
+                      src={vehicle.image || "/placeholder.svg"}
+                      alt={vehicle.name}
+                      width={72}
+                      height={56}
+                      className="rounded object-cover w-24 h-16"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-white text-base truncate">{vehicle.name}</p>
+                          <p className="text-white/70 text-xs">
+                            {vehicle.year} • {vehicle.transmission}
+                          </p>
+                        </div>
+                        <Badge
+                          className={
+                            vehicle.available
+                              ? "bg-green-500/20 text-green-400 border-green-500/30"
+                              : "bg-red-500/20 text-red-400 border-red-500/30"
+                          }
+                        >
+                          {vehicle.available ? "Available" : "Unavailable"}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/80">
+                        <div className="rounded bg-white/5 px-2 py-1">
+                          <span className="opacity-80">Category: </span>
+                          <span className="font-medium">{vehicle.category}</span>
+                        </div>
+                        <div className="rounded bg-white/5 px-2 py-1">
+                          <span className="opacity-80">Seats: </span>
+                          <span className="font-medium">{vehicle.passengers}</span>
+                        </div>
+                        <div className="rounded bg-white/5 px-2 py-1">
+                          <span className="opacity-80">Price/day: </span>
+                          <span className="font-medium">${vehicle.pricePerDay}</span>
+                        </div>
+                        <div className="rounded bg-white/5 px-2 py-1">
+                          <span className="opacity-80">Plate: </span>
+                          <span className="font-mono">{vehicle.licensePlate}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditDialog(vehicle)}
+                          className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 h-8 px-3"
+                        >
+                          <Edit className="h-3.5 w-3.5 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteVehicle(vehicle.id)}
+                          className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10 h-8 px-3"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Desktop / tablet table */}
+          <div className="fade-in-up hidden sm:block" style={{ animationDelay: "0.4s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
               <CardHeader>
                 <CardTitle className="text-white text-2xl">Fleet Overview ({vehicles.length} vehicles)</CardTitle>
@@ -535,13 +609,13 @@ function VehicleManagementContent() {
                   <Table>
                     <TableHeader>
                       <TableRow className="border-white/10">
-                        <TableHead className="text-white/80">Vehicle</TableHead>
-                        <TableHead className="text-white/80">Category</TableHead>
-                        <TableHead className="text-white/80">Price/Day</TableHead>
-                        <TableHead className="text-white/80">Passengers</TableHead>
-                        <TableHead className="text-white/80">Status</TableHead>
-                        <TableHead className="text-white/80">License</TableHead>
-                        <TableHead className="text-white/80">Actions</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Vehicle</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Category</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Price/Day</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Passengers</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Status</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">License</TableHead>
+                        <TableHead className="text-white/80 whitespace-nowrap">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -617,11 +691,11 @@ function VehicleManagementContent() {
               forceMount
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+              className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
             >
               <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
-                <DialogTitle className="text-white text-2xl">Edit Vehicle</DialogTitle>
+                <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
               </DialogHeader>
               <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleEditVehicle} isEdit />
             </DialogContent>
