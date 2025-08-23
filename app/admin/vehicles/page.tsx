@@ -13,21 +13,18 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AdminAuthGuard } from "@/components/admin-auth-guard"
-import { Car, Plus, Edit, Trash2, Upload, LogOut, AlertTriangle } from "lucide-react"
+import { Car, Plus, Edit, Trash2, Upload, LogOut } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 
+// ---- Supabase client (anon, safe for reads & DB insert) ----
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
 const STORAGE_BUCKET = "vehicle-photos"
 
-if (!supabase) {
-  console.warn("[Vehicles] Supabase client is NOT configured.")
-}
-
+// ---- Types ----
 const initialVehicles: Vehicle[] = []
-
 type VehicleId = string | number
 
 interface Vehicle {
@@ -78,8 +75,6 @@ const VehicleForm = memo(function VehicleForm({
   isEdit?: boolean
   onFilePicked: (file: File | null) => void
 }) {
-  const uploadRef = useRef<HTMLInputElement>(null)
-
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -140,25 +135,13 @@ function VehicleManagementContent() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
-
   const [formData, setFormData] = useState<FormState>({
-    name: "",
-    brand: "",
-    model: "",
-    pricePerDay: "",
-    passengers: "",
-    transmission: "",
-    fuel: "",
-    available: true,
-    description: "",
-    features: "",
-    year: "",
-    licensePlate: "",
+    name: "", brand: "", model: "", pricePerDay: "", passengers: "", transmission: "", fuel: "", available: true, description: "", features: "", year: "", licensePlate: "",
   })
-
   const [pickedFile, setPickedFile] = useState<File | null>(null)
   const router = useRouter()
 
+  // Load vehicles from DB
   useEffect(() => {
     const load = async () => {
       if (!supabase) return
@@ -167,21 +150,10 @@ function VehicleManagementContent() {
       const mapped: Vehicle[] = (data || []).map((v: any) => {
         const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(v.image_path)
         return {
-          id: v.id,
-          name: v.title,
-          brand: v.brand,
-          model: v.model,
-          image: pub?.publicUrl ?? null,
-          imagePath: v.image_path,
-          pricePerDay: v.rental_price,
-          passengers: 5,
-          transmission: "Automatic",
-          fuel: "Petrol",
-          available: v.available,
-          description: "",
-          features: [],
-          year: v.year,
-          licensePlate: v.registration_number,
+          id: v.id, name: v.title, brand: v.brand, model: v.model,
+          image: pub?.publicUrl ?? null, imagePath: v.image_path,
+          pricePerDay: v.rental_price, passengers: 5, transmission: "Automatic", fuel: "Petrol",
+          available: v.available, description: "", features: [], year: v.year, licensePlate: v.registration_number,
         }
       })
       setVehicles(mapped)
@@ -243,22 +215,10 @@ function VehicleManagementContent() {
     if (error) { alert(error.message); return }
 
     const mapped: Vehicle = {
-      id: data.id,
-      name: data.title,
-      brand: data.brand,
-      model: data.model,
-      category: `${data.brand} ${data.model}`,
-      image: publicUrl,
-      imagePath: data.image_path,
-      pricePerDay: data.rental_price,
-      passengers: 5,
-      transmission: "Automatic",
-      fuel: "Petrol",
-      available: data.available,
-      description: "",
-      features: [],
-      year: data.year,
-      licensePlate: data.registration_number,
+      id: data.id, name: data.title, brand: data.brand, model: data.model,
+      category: `${data.brand} ${data.model}`, image: publicUrl, imagePath: data.image_path,
+      pricePerDay: data.rental_price, passengers: 5, transmission: "Automatic", fuel: "Petrol",
+      available: data.available, description: "", features: [], year: data.year, licensePlate: data.registration_number,
     }
     setVehicles((prev) => [mapped, ...prev])
     setIsAddDialogOpen(false)
@@ -298,16 +258,11 @@ function VehicleManagementContent() {
     if (error) { alert(error.message); return }
 
     const updated: Vehicle = {
-      ...editingVehicle,
-      name: formData.name,
-      brand: formData.brand,
-      model: formData.model,
-      image: newPublicUrl,
-      imagePath: newImagePath ?? editingVehicle.imagePath,
-      pricePerDay: Number(formData.pricePerDay),
-      available: formData.available,
-      year: Number(formData.year),
-      licensePlate: formData.licensePlate,
+      ...editingVehicle, name: formData.name, brand: formData.brand, model: formData.model,
+      image: newPublicUrl, imagePath: newImagePath ?? editingVehicle.imagePath,
+      pricePerDay: Number(formData.pricePerDay), available: formData.available,
+      year: Number(formData.year), licensePlate: formData.licensePlate,
+      passengers: 5, transmission: "Automatic", fuel: "Petrol", description: "", features: [],
     }
     setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)))
     setIsEditDialogOpen(false)
