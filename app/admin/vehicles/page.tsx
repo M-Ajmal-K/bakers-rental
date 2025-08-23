@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useCallback, memo, useRef } from "react"
 import { createClient } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
@@ -9,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
@@ -19,54 +17,43 @@ import { Car, Plus, Edit, Trash2, Upload, LogOut, AlertTriangle } from "lucide-r
 import Link from "next/link"
 import Image from "next/image"
 
-// ---- Supabase client from env ----
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 const supabase = SUPABASE_URL && SUPABASE_ANON ? createClient(SUPABASE_URL, SUPABASE_ANON) : null
-
-// Use your existing bucket name consistently
 const STORAGE_BUCKET = "vehicle-photos"
 
-// Warn loudly if env missing
 if (!supabase) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    "[Vehicles] Supabase client is NOT configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY and redeploy."
-  )
+  console.warn("[Vehicles] Supabase client is NOT configured.")
 }
 
-// ---- No mock list by default; we fetch from DB. ----
 const initialVehicles: Vehicle[] = []
-
-const transmissionTypes = ["Automatic", "Manual"]
-const fuelTypes = ["Petrol", "Diesel", "Hybrid", "Electric"]
 
 type VehicleId = string | number
 
 interface Vehicle {
   id: VehicleId
-  name: string           // DB: title
-  brand: string          // DB
-  model: string          // DB
-  category?: string      // derived display
-  image: string | null   // public URL from storage path
-  imagePath?: string | null // storage relative path for removals/updates
-  pricePerDay: number    // DB: rental_price
-  passengers: number     // UI-only
-  transmission: string   // UI-only
-  fuel: string           // UI-only
-  available: boolean     // DB
-  description: string    // UI-only
-  features: string[]     // UI-only
-  year: number           // DB
-  licensePlate: string   // DB: registration_number
+  name: string
+  brand: string
+  model: string
+  category?: string
+  image: string | null
+  imagePath?: string | null
+  pricePerDay: number
+  passengers: number
+  transmission: string
+  fuel: string
+  available: boolean
+  description: string
+  features: string[]
+  year: number
+  licensePlate: string
 }
 
 type FormState = {
-  name: string            // title
+  name: string
   brand: string
   model: string
-  pricePerDay: string     // rental_price
+  pricePerDay: string
   year: string
   licensePlate: string
   passengers: string
@@ -77,7 +64,7 @@ type FormState = {
   features: string
 }
 
-/* ------------------------ Memoized vehicle form ------------------------ */
+/* ------------------------ Vehicle form ------------------------ */
 const VehicleForm = memo(function VehicleForm({
   formData,
   setFormData,
@@ -95,204 +82,54 @@ const VehicleForm = memo(function VehicleForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="name" className="text-white text-sm sm:text-base">Title</Label>
-          <Input
-            id="name"
-            placeholder="e.g., Premium SUV"
-            value={formData.name}
-            onChange={(e) => setFormData((s) => ({ ...s, name: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="name">Title</Label>
+          <Input id="name" value={formData.name} onChange={(e) => setFormData((s) => ({ ...s, name: e.target.value }))} required />
         </div>
-
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="brand" className="text-white text-sm sm:text-base">Brand</Label>
-          <Input
-            id="brand"
-            placeholder="e.g., Toyota"
-            value={formData.brand}
-            onChange={(e) => setFormData((s) => ({ ...s, brand: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+        <div>
+          <Label htmlFor="brand">Brand</Label>
+          <Input id="brand" value={formData.brand} onChange={(e) => setFormData((s) => ({ ...s, brand: e.target.value }))} required />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="model" className="text-white text-sm sm:text-base">Model</Label>
-          <Input
-            id="model"
-            placeholder="e.g., RAV4"
-            value={formData.model}
-            onChange={(e) => setFormData((s) => ({ ...s, model: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="model">Model</Label>
+          <Input id="model" value={formData.model} onChange={(e) => setFormData((s) => ({ ...s, model: e.target.value }))} required />
         </div>
-
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="licensePlate" className="text-white text-sm sm:text-base">Registration Number</Label>
-          <Input
-            id="licensePlate"
-            placeholder="e.g., FJ-1234"
-            value={formData.licensePlate}
-            onChange={(e) => setFormData((s) => ({ ...s, licensePlate: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+        <div>
+          <Label htmlFor="licensePlate">Registration Number</Label>
+          <Input id="licensePlate" value={formData.licensePlate} onChange={(e) => setFormData((s) => ({ ...s, licensePlate: e.target.value }))} required />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="pricePerDay" className="text-white text-sm sm:text-base">Price per Day ($)</Label>
-          <Input
-            id="pricePerDay"
-            type="number"
-            placeholder="85"
-            value={formData.pricePerDay}
-            onChange={(e) => setFormData((s) => ({ ...s, pricePerDay: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <Label htmlFor="pricePerDay">Price per Day ($)</Label>
+          <Input id="pricePerDay" type="number" value={formData.pricePerDay} onChange={(e) => setFormData((s) => ({ ...s, pricePerDay: e.target.value }))} required />
         </div>
-
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="year" className="text-white text-sm sm:text-base">Year</Label>
-          <Input
-            id="year"
-            type="number"
-            placeholder="2023"
-            value={formData.year}
-            onChange={(e) => setFormData((s) => ({ ...s, year: e.target.value }))}
-            required
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
+        <div>
+          <Label htmlFor="year">Year</Label>
+          <Input id="year" type="number" value={formData.year} onChange={(e) => setFormData((s) => ({ ...s, year: e.target.value }))} required />
         </div>
-
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label className="text-white text-sm sm:text-base">Availability</Label>
-          <div className="flex items-center space-x-2 h-10 sm:h-11">
-            <input
-              type="checkbox"
-              id="available"
-              checked={formData.available}
-              onChange={(e) => setFormData((s) => ({ ...s, available: e.target.checked }))}
-              className="rounded border-border"
-            />
-            <Label htmlFor="available" className="text-white text-sm sm:text-base">Available for booking</Label>
-          </div>
+        <div className="flex items-center space-x-2">
+          <input type="checkbox" id="available" checked={formData.available} onChange={(e) => setFormData((s) => ({ ...s, available: e.target.checked }))} />
+          <Label htmlFor="available">Available</Label>
         </div>
       </div>
 
-      {/* Upload only (no paste-URL path) */}
-      <div className="space-y-1.5 sm:space-y-2">
-        <Label htmlFor="image" className="text-white text-sm sm:text-base">Vehicle Image</Label>
+      <div>
+        <Label>Vehicle Image</Label>
         <div className="flex gap-2">
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            id="image-upload-input"
-            onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => document.getElementById("image-upload-input")?.click()}
-            title="Upload image from your device"
-          >
+          <input type="file" accept="image/*" className="hidden" id="image-upload-input" onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)} />
+          <Button type="button" variant="outline" onClick={() => document.getElementById("image-upload-input")?.click()}>
             <Upload className="h-4 w-4" />
           </Button>
-          <span className="text-white/70 text-sm self-center">PNG/JPG/WEBP up to 10MB</span>
         </div>
       </div>
 
-      {/* ——— UI-only extras retained ——— */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="passengers" className="text-white text-sm sm:text-base">Passengers (UI)</Label>
-          <Input
-            id="passengers"
-            type="number"
-            placeholder="5"
-            value={formData.passengers}
-            onChange={(e) => setFormData((s) => ({ ...s, passengers: e.target.value }))}
-            className="text-white placeholder:text-white/60 h-10 sm:h-11"
-          />
-        </div>
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="transmission" className="text-white text-sm sm:text-base">Transmission (UI)</Label>
-          <Select
-            value={formData.transmission}
-            onValueChange={(value) => setFormData((s) => ({ ...s, transmission: value }))}
-          >
-            <SelectTrigger className="text-white placeholder:text-white/60 h-10 sm:h-11">
-              <SelectValue placeholder="Select transmission" />
-            </SelectTrigger>
-            <SelectContent>
-              {transmissionTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5 sm:space-y-2">
-          <Label htmlFor="fuel" className="text-white text-sm sm:text-base">Fuel (UI)</Label>
-          <Select value={formData.fuel} onValueChange={(value) => setFormData((s) => ({ ...s, fuel: value }))}>
-            <SelectTrigger className="text-white placeholder:text-white/60 h-10 sm:h-11">
-              <SelectValue placeholder="Select fuel type" />
-            </SelectTrigger>
-            <SelectContent>
-              {fuelTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="space-y-1.5 sm:space-y-2">
-        <Label htmlFor="description" className="text-white text-sm sm:text-base">Description (UI)</Label>
-        <Textarea
-          id="description"
-          placeholder="Brief description (not stored in DB schema yet)..."
-          value={formData.description}
-          onChange={(e) => setFormData((s) => ({ ...s, description: e.target.value }))}
-          rows={3}
-          className="text-white placeholder:text-white/60"
-        />
-      </div>
-
-      <div className="space-y-1.5 sm:space-y-2">
-        <Label htmlFor="features" className="text-white text-sm sm:text-base">Features (UI, comma-separated)</Label>
-        <Input
-          id="features"
-          placeholder="Air Conditioning, GPS, Bluetooth"
-          value={formData.features}
-          onChange={(e) => setFormData((s) => ({ ...s, features: e.target.value }))}
-          className="text-white placeholder:text-white/60 h-10 sm:h-11"
-        />
-      </div>
-
-      <div className="flex gap-2 pt-2 sm:pt-4">
-        <Button type="submit" className="bg-primary hover:bg-primary/90 h-10 sm:h-11 px-4 sm:px-5">
-          {isEdit ? "Update Vehicle" : "Add Vehicle"}
-        </Button>
-        <Button type="button" variant="outline" className="h-10 sm:h-11 px-4 sm:px-5">
-          Cancel
-        </Button>
-      </div>
+      <Button type="submit">{isEdit ? "Update Vehicle" : "Add Vehicle"}</Button>
     </form>
   )
 })
@@ -319,585 +156,235 @@ function VehicleManagementContent() {
     licensePlate: "",
   })
 
-  // holds the file selected from the upload button
   const [pickedFile, setPickedFile] = useState<File | null>(null)
-
   const router = useRouter()
 
   useEffect(() => {
-    const activate = () => {
-      document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
-    }
-    activate()
-    window.addEventListener("scroll", activate)
-    return () => window.removeEventListener("scroll", activate)
-  }, [])
-
-  // Load vehicles from Supabase (no mock fallback; if missing client, we show notice)
-  useEffect(() => {
     const load = async () => {
       if (!supabase) return
-
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select(
-          "id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at"
-        )
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        // eslint-disable-next-line no-console
-        console.error("[Vehicles] Supabase select error:", error)
-        return
-      }
-      if (!data) {
-        // eslint-disable-next-line no-console
-        console.error("[Vehicles] Supabase select returned no data.")
-        return
-      }
-
-      const mapped: Vehicle[] = data.map((v: any) => {
-        let publicUrl: string | null = null
-        if (v.image_path) {
-          const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(v.image_path)
-          publicUrl = pub?.publicUrl ?? null
-        }
+      const { data, error } = await supabase.from("vehicles").select("*").order("created_at", { ascending: false })
+      if (error) { console.error(error); return }
+      const mapped: Vehicle[] = (data || []).map((v: any) => {
+        const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(v.image_path)
         return {
           id: v.id,
           name: v.title,
           brand: v.brand,
           model: v.model,
-          category: `${v.brand} ${v.model}`,
-          image: publicUrl,
-          imagePath: v.image_path ?? null,
-          pricePerDay: Number(v.rental_price ?? 0),
-          passengers: 5, // UI defaults
+          image: pub?.publicUrl ?? null,
+          imagePath: v.image_path,
+          pricePerDay: v.rental_price,
+          passengers: 5,
           transmission: "Automatic",
           fuel: "Petrol",
-          available: Boolean(v.available),
+          available: v.available,
           description: "",
           features: [],
-          year: Number(v.year ?? 0),
-          licensePlate: v.registration_number ?? "",
+          year: v.year,
+          licensePlate: v.registration_number,
         }
       })
-
       setVehicles(mapped)
     }
     load()
   }, [])
 
-  const handleLogout = () => {
-    localStorage.removeItem("adminAuth")
-    localStorage.removeItem("adminUser")
-    router.push("/admin/login")
-  }
-
   const resetForm = useCallback(() => {
-    setFormData({
-      name: "",
-      brand: "",
-      model: "",
-      pricePerDay: "",
-      passengers: "",
-      transmission: "",
-      fuel: "",
-      available: true,
-      description: "",
-      features: "",
-      year: "",
-      licensePlate: "",
-    })
+    setFormData({ name: "", brand: "", model: "", pricePerDay: "", passengers: "", transmission: "", fuel: "", available: true, description: "", features: "", year: "", licensePlate: "" })
     setPickedFile(null)
   }, [])
 
-  // Upload image file to Supabase Storage and return { publicUrl, path }
+  // ✅ Secure upload via API route
   const uploadImage = useCallback(async (file: File) => {
-    if (!supabase) return { publicUrl: "", path: "" }
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase()
-    const fileName = `${crypto.randomUUID()}.${ext}`
-    const path = `vehicles/${fileName}`
+    const formData = new FormData()
+    formData.append("file", file)
 
-    const { error: uploadErr } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || "image/jpeg",
-    })
-    if (uploadErr) {
-      // eslint-disable-next-line no-console
-      console.error("[Vehicles] Storage upload error:", uploadErr)
-      throw uploadErr
+    const res = await fetch("/api/storage/upload", { method: "POST", body: formData })
+    if (!res.ok) {
+      const err = await res.json()
+      console.error("[Vehicles] Upload API error:", err)
+      throw new Error(err.error || "Upload failed")
     }
-
-    const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path)
-    return { publicUrl: pub?.publicUrl || "", path }
+    const data = await res.json()
+    return { publicUrl: data.publicUrl as string, path: data.path as string }
   }, [])
 
-  const handleAddVehicle = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault()
+  // Add vehicle
+  const handleAddVehicle = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!supabase) return
 
-      if (!supabase) {
-        alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
-        return
-      }
+    let image_path: string | null = null
+    let publicUrl: string | null = null
 
-      // 1) upload image if picked
-      let image_path: string | null = null
-      let publicUrl: string | null = null
-
-      try {
-        if (pickedFile) {
-          const up = await uploadImage(pickedFile)
-          image_path = up.path
-          publicUrl = up.publicUrl
-        }
-      } catch {
-        alert("Image upload failed. See console for details.")
-        return
-      }
-
-      // 2) insert DB row
-      const payload = {
-        registration_number: formData.licensePlate,
-        title: formData.name,
-        brand: formData.brand,
-        model: formData.model,
-        year: Number.parseInt(formData.year),
-        rental_price: Number.parseFloat(formData.pricePerDay),
-        image_path: image_path, // path relative to bucket
-        available: formData.available,
-      }
-
-      const { data, error } = await supabase.from("vehicles").insert(payload).select().single()
-      if (error) {
-        // eslint-disable-next-line no-console
-        console.error("[Vehicles] Supabase insert error:", error)
-        alert(`Failed to save vehicle: ${error.message}`)
-        return
-      }
-      if (!data) {
-        // eslint-disable-next-line no-console
-        console.error("[Vehicles] Supabase insert returned no data.")
-        alert("Vehicle was not saved. Please try again.")
-        return
-      }
-
-      // 3) resolve display URL if needed
-      let dbUrl: string | null = publicUrl
-      if (data.image_path && !dbUrl) {
-        const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(data.image_path)
-        dbUrl = pub?.publicUrl ?? null
-      }
-
-      // 4) map DB row to UI type
-      const mapped: Vehicle = {
-        id: data.id,
-        name: data.title,
-        brand: data.brand,
-        model: data.model,
-        category: `${data.brand} ${data.model}`,
-        image: dbUrl,
-        imagePath: data.image_path ?? null,
-        pricePerDay: Number(data.rental_price ?? 0),
-        passengers: Number.parseInt(formData.passengers || "5"),
-        transmission: formData.transmission || "Automatic",
-        fuel: formData.fuel || "Petrol",
-        available: Boolean(data.available),
-        description: formData.description || "",
-        features: formData.features ? formData.features.split(",").map((f) => f.trim()).filter(Boolean) : [],
-        year: Number(data.year ?? 0),
-        licensePlate: data.registration_number ?? "",
-      }
-      setVehicles((prev) => [mapped, ...prev])
-
-      setIsAddDialogOpen(false)
-      resetForm()
-    },
-    [formData, pickedFile, resetForm, uploadImage],
-  )
-
-  const handleEditVehicle = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault()
-      if (!editingVehicle) return
-
-      if (!supabase) {
-        alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
-        return
-      }
-
-      let newPublicUrl: string | null = editingVehicle.image as string | null
-      let newImagePath: string | null = null
-
+    try {
       if (pickedFile) {
-        try {
-          const up = await uploadImage(pickedFile)
-          newPublicUrl = up.publicUrl
-          newImagePath = up.path
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error("[Vehicles] Storage upload error (edit):", err)
-          alert("Image upload failed. Keeping previous image.")
-        }
+        const up = await uploadImage(pickedFile)
+        image_path = up.path
+        publicUrl = up.publicUrl
       }
+    } catch {
+      alert("Image upload failed.")
+      return
+    }
 
-      // Persist to DB (only DB columns)
-      const payload: any = {
-        registration_number: formData.licensePlate,
-        title: formData.name,
-        brand: formData.brand,
-        model: formData.model,
-        year: Number.parseInt(formData.year),
-        rental_price: Number.parseFloat(formData.pricePerDay),
-        available: formData.available,
+    const payload = {
+      registration_number: formData.licensePlate,
+      title: formData.name,
+      brand: formData.brand,
+      model: formData.model,
+      year: Number(formData.year),
+      rental_price: Number(formData.pricePerDay),
+      image_path,
+      available: formData.available,
+    }
+
+    const { data, error } = await supabase.from("vehicles").insert(payload).select().single()
+    if (error) { alert(error.message); return }
+
+    const mapped: Vehicle = {
+      id: data.id,
+      name: data.title,
+      brand: data.brand,
+      model: data.model,
+      category: `${data.brand} ${data.model}`,
+      image: publicUrl,
+      imagePath: data.image_path,
+      pricePerDay: data.rental_price,
+      passengers: 5,
+      transmission: "Automatic",
+      fuel: "Petrol",
+      available: data.available,
+      description: "",
+      features: [],
+      year: data.year,
+      licensePlate: data.registration_number,
+    }
+    setVehicles((prev) => [mapped, ...prev])
+    setIsAddDialogOpen(false)
+    resetForm()
+  }, [formData, pickedFile, uploadImage, resetForm])
+
+  // Edit vehicle
+  const handleEditVehicle = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingVehicle || !supabase) return
+
+    let newPublicUrl: string | null = editingVehicle.image
+    let newImagePath: string | null = null
+
+    if (pickedFile) {
+      try {
+        const up = await uploadImage(pickedFile)
+        newPublicUrl = up.publicUrl
+        newImagePath = up.path
+      } catch {
+        alert("Image upload failed. Keeping old image.")
       }
-      if (newImagePath) payload.image_path = newImagePath
+    }
 
-      const { error } = await supabase.from("vehicles").update(payload).eq("id", editingVehicle.id)
-      if (error) {
-        // eslint-disable-next-line no-console
-        console.error("[Vehicles] Supabase update error:", error)
-        alert(`Failed to update vehicle: ${error.message}`)
-        return
-      }
+    const payload: any = {
+      registration_number: formData.licensePlate,
+      title: formData.name,
+      brand: formData.brand,
+      model: formData.model,
+      year: Number(formData.year),
+      rental_price: Number(formData.pricePerDay),
+      available: formData.available,
+    }
+    if (newImagePath) payload.image_path = newImagePath
 
-      // Update UI only after successful DB update
-      const updatedVehicle: Vehicle = {
-        ...editingVehicle,
-        name: formData.name,
-        brand: formData.brand,
-        model: formData.model,
-        category: `${formData.brand} ${formData.model}`,
-        image: newPublicUrl || editingVehicle.image || "/placeholder.svg",
-        imagePath: newImagePath ?? editingVehicle.imagePath ?? null,
-        pricePerDay: Number.parseFloat(formData.pricePerDay),
-        passengers: Number.parseInt(formData.passengers || "5"),
-        transmission: formData.transmission || "Automatic",
-        fuel: formData.fuel || "Petrol",
-        available: formData.available,
-        description: formData.description || "",
-        features: formData.features ? formData.features.split(",").map((f) => f.trim()).filter(Boolean) : [],
-        year: Number.parseInt(formData.year),
-        licensePlate: formData.licensePlate,
-      }
-      setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updatedVehicle : v)))
+    const { error } = await supabase.from("vehicles").update(payload).eq("id", editingVehicle.id)
+    if (error) { alert(error.message); return }
 
-      setIsEditDialogOpen(false)
-      setEditingVehicle(null)
-      resetForm()
-    },
-    [editingVehicle, formData, pickedFile, resetForm, uploadImage],
-  )
+    const updated: Vehicle = {
+      ...editingVehicle,
+      name: formData.name,
+      brand: formData.brand,
+      model: formData.model,
+      image: newPublicUrl,
+      imagePath: newImagePath ?? editingVehicle.imagePath,
+      pricePerDay: Number(formData.pricePerDay),
+      available: formData.available,
+      year: Number(formData.year),
+      licensePlate: formData.licensePlate,
+    }
+    setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)))
+    setIsEditDialogOpen(false)
+    setEditingVehicle(null)
+    resetForm()
+  }, [editingVehicle, formData, pickedFile, uploadImage, resetForm])
 
+  // Delete
   const handleDeleteVehicle = async (id: VehicleId) => {
-    if (!supabase) {
-      alert("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.")
-      return
-    }
+    if (!supabase) return
     const victim = vehicles.find((v) => v.id === id)
-    if (!confirm("Are you sure you want to delete this vehicle?")) return
-    const { error } = await supabase.from("vehicles").delete().eq("id", id)
-    if (error) {
-      // eslint-disable-next-line no-console
-      console.error("[Vehicles] Supabase delete error:", error)
-      alert(`Failed to delete vehicle: ${error.message}`)
-      return
-    }
+    if (!confirm("Delete this vehicle?")) return
 
-    // Best-effort: remove image from storage
+    const { error } = await supabase.from("vehicles").delete().eq("id", id)
+    if (error) { alert(error.message); return }
+
     if (victim?.imagePath) {
-      const { error: rmErr } = await supabase.storage.from(STORAGE_BUCKET).remove([victim.imagePath])
-      if (rmErr) {
-        // eslint-disable-next-line no-console
-        console.warn("[Vehicles] Storage remove warning:", rmErr.message)
-      }
+      await supabase.storage.from(STORAGE_BUCKET).remove([victim.imagePath])
     }
 
     setVehicles((prev) => prev.filter((v) => v.id !== id))
   }
 
-  const openEditDialog = (vehicle: Vehicle) => {
-    setEditingVehicle(vehicle)
-    setFormData({
-      name: vehicle.name,
-      brand: vehicle.brand,
-      model: vehicle.model,
-      pricePerDay: vehicle.pricePerDay.toString(),
-      passengers: String(vehicle.passengers || 5),
-      transmission: vehicle.transmission || "Automatic",
-      fuel: vehicle.fuel || "Petrol",
-      available: vehicle.available,
-      description: vehicle.description || "",
-      features: (vehicle.features || []).join(", "),
-      year: vehicle.year.toString(),
-      licensePlate: vehicle.licensePlate,
-    })
-    setPickedFile(null)
-    setIsEditDialogOpen(true)
-  }
-
-  const keyFor = (v: Vehicle) => (typeof v.id === "string" ? v.id : `local-${v.id}-${v.licensePlate}`)
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
-      <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
-        <div className="container mx-auto px-4 py-3 sm:py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3 sm:space-x-4">
-              <Link href="/admin/dashboard" className="flex items-center space-x-2 sm:space-x-3 group">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                  <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                </div>
-                <div>
-                  <span className="text-xl sm:text-2xl font-bold text-white">Bakers Rentals</span>
-                  <p className="text-white/80 text-xs sm:text-sm">Vehicle Management</p>
-                </div>
-              </Link>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent h-9 px-3"
-            >
-              <LogOut className="h-4 w-4 mr-1.5" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          </div>
-        </div>
+      <nav className="sticky top-0 z-50 flex justify-between p-4">
+        <Link href="/admin/dashboard" className="text-white font-bold">Bakers Rentals</Link>
+        <Button onClick={() => { localStorage.clear(); router.push("/admin/login") }}><LogOut /> Logout</Button>
       </nav>
 
-      {!supabase && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 px-4 py-3">
-          <div className="container mx-auto max-w-7xl flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
-            Supabase is not configured. Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-            <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment and redeploy.
-          </div>
-        </div>
-      )}
+      <section className="p-6">
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button><Plus /> Add Vehicle</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add Vehicle</DialogTitle>
+              <DialogDescription>Fill details below</DialogDescription>
+            </DialogHeader>
+            <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleAddVehicle} onFilePicked={setPickedFile} />
+          </DialogContent>
+        </Dialog>
 
-      <section className="py-8 sm:py-12 px-4">
-        <div className="container mx-auto max-w-7xl">
-          <div className="flex items-center justify-between mb-6 sm:mb-12">
-            <div className="fade-in-up">
-              <h1 className="text-2xl sm:text-5xl font-bold text-white mb-2 sm:mb-4 drop-shadow-lg">
-                Vehicle Fleet Management
-              </h1>
-              <p className="text-white/80 text-sm sm:text-xl">Manage your premium vehicle collection</p>
-            </div>
-            <div className="fade-in-up" style={{ animationDelay: "0.2s" }}>
-              <Dialog open={isAddDialogOpen} onOpenChange={(o) => { setIsAddDialogOpen(o); if (!o) resetForm() }}>
-                <DialogTrigger asChild>
-                  <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg">
-                    <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2" />
-                    <span>Add Vehicle</span>
-                  </Button>
-                </DialogTrigger>
-
-                <DialogContent
-                  forceMount
-                  aria-describedby="add-vehicle-desc"
-                  onOpenAutoFocus={(e) => e.preventDefault()}
-                  onCloseAutoFocus={(e) => e.preventDefault()}
-                  className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
-                >
-                  <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
-                  <DialogHeader>
-                    <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
-                    <DialogDescription id="add-vehicle-desc" className="text-white/80">
-                      Upload a photo and fill in the vehicle details. All fields marked * are required.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <VehicleForm
-                    formData={formData}
-                    setFormData={setFormData}
-                    onSubmit={handleAddVehicle}
-                    onFilePicked={setPickedFile}
-                  />
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-
-          {/* Mobile list (no horizontal scroll) */}
-          <div className="space-y-3 sm:hidden">
-            {vehicles.map((vehicle) => (
-              <Card key={keyFor(vehicle)} className="glass-effect-dark border-white/10">
-                <CardContent className="p-3">
-                  <div className="flex gap-3">
-                    <Image
-                      src={(vehicle.image as string) || "/placeholder.svg"}
-                      alt={vehicle.name}
-                      width={72}
-                      height={56}
-                      className="rounded object-cover w-24 h-16"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-white text-base truncate">{vehicle.name}</p>
-                          <p className="text-white/70 text-xs">
-                            {vehicle.brand} {vehicle.model} • {vehicle.year}
-                          </p>
-                        </div>
-                        <Badge
-                          className={
-                            vehicle.available
-                              ? "bg-green-500/20 text-green-400 border-green-500/30"
-                              : "bg-red-500/20 text-red-400 border-red-500/30"
-                          }
-                        >
-                          {vehicle.available ? "Available" : "Unavailable"}
-                        </Badge>
-                      </div>
-
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/80">
-                        <div className="rounded bg-white/5 px-2 py-1">
-                          <span className="opacity-80">Price/day: </span>
-                          <span className="font-medium">${vehicle.pricePerDay}</span>
-                        </div>
-                        <div className="rounded bg-white/5 px-2 py-1">
-                          <span className="opacity-80">Plate: </span>
-                          <span className="font-mono">{vehicle.licensePlate}</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditDialog(vehicle)}
-                          className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 h-8 px-3"
-                        >
-                          <Edit className="h-3.5 w-3.5 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteVehicle(vehicle.id)}
-                          className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10 h-8 px-3"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" />
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+        {/* List */}
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Image</TableHead><TableHead>Name</TableHead><TableHead>Plate</TableHead><TableHead>Price</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vehicles.map((v) => (
+              <TableRow key={v.id}>
+                <TableCell><Image src={v.image || "/placeholder.svg"} alt={v.name} width={60} height={40} /></TableCell>
+                <TableCell>{v.name}</TableCell>
+                <TableCell>{v.licensePlate}</TableCell>
+                <TableCell>${v.pricePerDay}</TableCell>
+                <TableCell><Badge>{v.available ? "Available" : "Unavailable"}</Badge></TableCell>
+                <TableCell>
+                  <Button size="sm" onClick={() => { setEditingVehicle(v); setFormData({ ...formData, name: v.name, brand: v.brand, model: v.model, year: v.year.toString(), pricePerDay: v.pricePerDay.toString(), licensePlate: v.licensePlate, passengers: "5", transmission: "Automatic", fuel: "Petrol", available: v.available, description: "", features: "" }); setIsEditDialogOpen(true) }}><Edit /></Button>
+                  <Button size="sm" variant="destructive" onClick={() => handleDeleteVehicle(v.id)}><Trash2 /></Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </div>
+          </TableBody>
+        </Table>
 
-          {/* Desktop / tablet table */}
-          <div className="fade-in-up hidden sm:block" style={{ animationDelay: "0.4s" }}>
-            <Card className="card-3d border-0 glass-effect-dark">
-              <CardHeader>
-                <CardTitle className="text-white text-2xl">Fleet Overview ({vehicles.length} vehicles)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-white/10">
-                        <TableHead className="text-white/80 whitespace-nowrap">Vehicle</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Brand / Model</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Price/Day</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Year</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Status</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Registration</TableHead>
-                        <TableHead className="text-white/80 whitespace-nowrap">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {vehicles.map((vehicle) => (
-                        <TableRow key={keyFor(vehicle)} className="border-white/10 hover:bg-white/5">
-                          <TableCell>
-                            <div className="flex items-center space-x-3">
-                              <Image
-                                src={(vehicle.image as string) || "/placeholder.svg"}
-                                alt={vehicle.name}
-                                width={50}
-                                height={40}
-                                className="rounded object-cover"
-                              />
-                              <div>
-                                <p className="font-medium text-white">{vehicle.name}</p>
-                                <p className="text-sm text-white/70">{vehicle.year}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-white/80">{vehicle.brand} {vehicle.model}</TableCell>
-                          <TableCell className="font-medium text-white">${vehicle.pricePerDay}</TableCell>
-                          <TableCell className="text-white/80">{vehicle.year}</TableCell>
-                          <TableCell>
-                            <Badge
-                              className={
-                                vehicle.available
-                                  ? "bg-green-500/20 text-green-400 border-green-500/30"
-                                  : "bg-red-500/20 text-red-400 border-red-500/30"
-                              }
-                            >
-                              {vehicle.available ? "Available" : "Unavailable"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm text-white/80">{vehicle.licensePlate}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openEditDialog(vehicle)}
-                                className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteVehicle(vehicle.id)}
-                                className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Dialog open={isEditDialogOpen} onOpenChange={(o) => { setIsEditDialogOpen(o); if (!o) resetForm() }}>
-            <DialogContent
-              forceMount
-              aria-describedby="edit-vehicle-desc"
-              onOpenAutoFocus={(e) => e.preventDefault()}
-              onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
-            >
-              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
-              <DialogHeader>
-                <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
-                <DialogDescription id="edit-vehicle-desc" className="text-white/80">
-                  Update details or upload a new photo for this vehicle.
-                </DialogDescription>
-              </DialogHeader>
-              <VehicleForm
-                formData={formData}
-                setFormData={setFormData}
-                onSubmit={handleEditVehicle}
-                onFilePicked={setPickedFile}
-                isEdit
-              />
-            </DialogContent>
-          </Dialog>
-        </div>
+        {/* Edit dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Vehicle</DialogTitle>
+            </DialogHeader>
+            <VehicleForm formData={formData} setFormData={setFormData} onSubmit={handleEditVehicle} onFilePicked={setPickedFile} isEdit />
+          </DialogContent>
+        </Dialog>
       </section>
     </div>
   )
