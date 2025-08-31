@@ -52,7 +52,7 @@ export default function VehicleManagement() {
       const { data, error } = await supabase
         .from("vehicles")
         .select(
-          "id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at"
+          "id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at, category, passengers, transmission, fuel, features"
         )
         .order("created_at", { ascending: false });
 
@@ -79,11 +79,15 @@ export default function VehicleManagement() {
             available: Boolean(v.available),
             image: publicUrl,
             imagePath: v.image_path ?? null,
-            category: "",
-            passengers: 5,
-            transmission: "Automatic",
-            fuel: "Petrol",
-            features: [],
+            category: v.category ?? "",
+            passengers: Number(v.passengers ?? 0),
+            transmission: v.transmission ?? "",
+            fuel: v.fuel ?? "",
+            features: Array.isArray(v.features)
+              ? v.features
+              : v.features
+              ? String(v.features).split(",").map((f) => f.trim())
+              : [],
           };
         }) || [];
 
@@ -160,6 +164,13 @@ export default function VehicleManagement() {
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
         image_path,
         available: formData.available,
+        category: formData.category,
+        passengers: Number(formData.passengers || 0),
+        transmission: formData.transmission,
+        fuel: formData.fuel,
+        features: formData.features
+          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
+          : [],
       };
 
       const { data, error } = await supabase.from("vehicles").insert(payload).select().single();
@@ -180,11 +191,15 @@ export default function VehicleManagement() {
         available: Boolean(data.available),
         image: publicUrl,
         imagePath: data.image_path ?? null,
-        category: formData.category,
-        passengers: Number.parseInt(formData.passengers || "5"),
-        transmission: formData.transmission || "Automatic",
-        fuel: formData.fuel || "Petrol",
-        features: formData.features ? formData.features.split(",").map((f) => f.trim()).filter(Boolean) : [],
+        category: data.category ?? "",
+        passengers: Number(data.passengers ?? 0),
+        transmission: data.transmission ?? "",
+        fuel: data.fuel ?? "",
+        features: Array.isArray(data.features)
+          ? data.features
+          : data.features
+          ? String(data.features).split(",").map((f) => f.trim())
+          : [],
       };
 
       setVehicles((prev) => [newVehicle, ...prev]);
@@ -206,9 +221,9 @@ export default function VehicleManagement() {
       licensePlate: v.licensePlate,
       available: v.available,
       category: v.category || "",
-      passengers: String(v.passengers || 5),
-      transmission: v.transmission || "Automatic",
-      fuel: v.fuel || "Petrol",
+      passengers: String(v.passengers || 0),
+      transmission: v.transmission || "",
+      fuel: v.fuel || "",
       features: (v.features || []).join(", "),
     });
     setPickedFile(null);
@@ -240,6 +255,13 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
         available: formData.available,
+        category: formData.category,
+        passengers: Number(formData.passengers || 0),
+        transmission: formData.transmission,
+        fuel: formData.fuel,
+        features: formData.features
+          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
+          : [],
       };
       if (newImagePath) payload.image_path = newImagePath;
 
@@ -262,12 +284,12 @@ export default function VehicleManagement() {
         image: newPublicUrl,
         imagePath: newImagePath ?? editingVehicle.imagePath,
         category: formData.category,
-        passengers: Number.parseInt(formData.passengers || String(editingVehicle.passengers || 5)),
-        transmission: formData.transmission || editingVehicle.transmission,
-        fuel: formData.fuel || editingVehicle.fuel,
+        passengers: Number(formData.passengers || 0),
+        transmission: formData.transmission,
+        fuel: formData.fuel,
         features: formData.features
           ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : editingVehicle.features,
+          : (Array.isArray(editingVehicle.features) ? editingVehicle.features : []),
       };
 
       setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)));
@@ -325,7 +347,7 @@ export default function VehicleManagement() {
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent h-9 px-3"
+              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent h-9 px-3 cursor-pointer"
             >
               <LogOut className="h-4 w-4 mr-1.5" />
               <span className="hidden sm:inline">Logout</span>
@@ -363,7 +385,7 @@ export default function VehicleManagement() {
               }}
             >
               <DialogTrigger asChild>
-                <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg">
+                <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg cursor-pointer">
                   <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2" />
                   <span>Add Vehicle</span>
                 </Button>

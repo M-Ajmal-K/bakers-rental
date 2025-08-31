@@ -15,7 +15,7 @@ export default function VehicleList({
 }: {
   vehicles: Vehicle[];
   onEdit: (v: Vehicle) => void;
-  onDelete: (id: string | number) => void; // ✅ simplified to only accept id
+  onDelete: (id: string | number) => void;
 }) {
   const keyFor = (v: Vehicle) =>
     typeof v.id === "string" ? v.id : `v-${v.id}-${v.licensePlate}`;
@@ -66,8 +66,20 @@ export default function VehicleList({
                       <span className="font-medium">{vehicle.passengers}</span>
                     </div>
                     <div className="rounded bg-white/5 px-2 py-1">
+                      <span className="opacity-80">Fuel: </span>
+                      <span className="font-medium">{vehicle.fuel || "—"}</span>
+                    </div>
+                    <div className="rounded bg-white/5 px-2 py-1">
                       <span className="opacity-80">Price/day: </span>
                       <span className="font-medium">${vehicle.pricePerDay}</span>
+                    </div>
+                    <div className="rounded bg-white/5 px-2 py-1 col-span-2">
+                      <span className="opacity-80">Features: </span>
+                      <span className="font-medium">
+                        {vehicle.features && vehicle.features.length > 0
+                          ? vehicle.features.join(", ")
+                          : "—"}
+                      </span>
                     </div>
                     <div className="rounded bg-white/5 px-2 py-1">
                       <span className="opacity-80">Plate: </span>
@@ -89,7 +101,7 @@ export default function VehicleList({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => onDelete(vehicle.id)} // ✅ only pass id
+                      onClick={() => onDelete(vehicle.id)}
                       className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10 h-8 px-3"
                     >
                       <Trash2 className="h-3.5 w-3.5 mr-1" />
@@ -118,8 +130,11 @@ export default function VehicleList({
                   <TableRow className="border-white/10">
                     <TableHead className="text-white/80 whitespace-nowrap">Vehicle</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">Category</TableHead>
+                    <TableHead className="text-white/80 whitespace-nowrap">Transmission</TableHead>
+                    <TableHead className="text-white/80 whitespace-nowrap">Fuel</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">Price/Day</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">Passengers</TableHead>
+                    <TableHead className="text-white/80 whitespace-nowrap">Features</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">Status</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">License</TableHead>
                     <TableHead className="text-white/80 whitespace-nowrap">Actions</TableHead>
@@ -151,8 +166,15 @@ export default function VehicleList({
                           {vehicle.category || "—"}
                         </Badge>
                       </TableCell>
+                      <TableCell className="text-white/80">{vehicle.transmission || "—"}</TableCell>
+                      <TableCell className="text-white/80">{vehicle.fuel || "—"}</TableCell>
                       <TableCell className="font-medium text-white">${vehicle.pricePerDay}</TableCell>
                       <TableCell className="text-white/80">{vehicle.passengers}</TableCell>
+                      <TableCell className="text-white/80">
+                        {vehicle.features && vehicle.features.length > 0
+                          ? vehicle.features.join(", ")
+                          : "—"}
+                      </TableCell>
                       <TableCell>
                         <Badge
                           className={
@@ -164,7 +186,9 @@ export default function VehicleList({
                           {vehicle.available ? "Available" : "Unavailable"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm text-white/80">{vehicle.licensePlate}</TableCell>
+                      <TableCell className="font-mono text-sm text-white/80">
+                        {vehicle.licensePlate}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-2">
                           <Button
@@ -178,7 +202,7 @@ export default function VehicleList({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onDelete(vehicle.id)} // ✅ only pass id
+                            onClick={() => onDelete(vehicle.id)}
                             className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
                           >
                             <Trash2 className="h-4 w-4" />

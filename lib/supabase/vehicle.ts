@@ -8,7 +8,8 @@ export async function getVehicles() {
   const { data, error } = await supabase
     .from("vehicles")
     .select(
-      "id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at, category, passengers, transmission, fuel, features"
+      `id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at,
+       category, passengers, transmission, fuel, features`
     )
     .order("created_at", { ascending: false });
 
@@ -39,9 +40,14 @@ export async function addVehicle(vehicle: {
   model: string;
   year: number;
   registration_number: string;
-  seats: number;
-  price_per_day: number;
-  image_path: string | null; // ✅ storage path only
+  passengers: number;
+  rental_price: number;
+  image_path: string | null;
+  available: boolean;
+  category: string;
+  transmission: string;
+  fuel: string;
+  features?: string[];
 }) {
   const payload = {
     ...vehicle,
@@ -62,7 +68,10 @@ export async function addVehicle(vehicle: {
  * Delete a vehicle by ID.
  * Also remove its image from Supabase storage if `image_path` exists.
  */
-export async function deleteVehicle(id: string | number, imagePath?: string | null) {
+export async function deleteVehicle(
+  id: string | number,
+  imagePath?: string | null
+) {
   const { error } = await supabase.from("vehicles").delete().eq("id", id);
   if (error) throw error;
 
