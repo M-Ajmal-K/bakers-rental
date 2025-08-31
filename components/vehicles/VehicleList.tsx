@@ -1,10 +1,9 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Edit, Trash2, Users, Fuel, Car } from "lucide-react";
 import Image from "next/image";
 import { Vehicle } from "./VehicleTypes";
 
@@ -21,79 +20,141 @@ export default function VehicleList({
     typeof v.id === "string" ? v.id : `v-${v.id}-${v.licensePlate}`;
 
   return (
-    <>
-      {/* Mobile list */}
-      <div className="space-y-3 sm:hidden">
-        {vehicles.map((vehicle) => (
-          <Card key={keyFor(vehicle)} className="glass-effect-dark border-white/10">
-            <CardContent className="p-3">
-              <div className="flex gap-3">
-                <div className="relative w-24 h-16">
+    <section className="py-8 px-3 sm:px-6">
+      <div className="container mx-auto max-w-7xl">
+        {vehicles.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-20 h-20 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4">
+              <Car className="h-10 w-10 text-gray-800" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">No vehicles found</h3>
+            <p className="text-gray-500 text-base">Start by adding your first vehicle.</p>
+          </div>
+        ) : (
+          <div
+            className="
+              grid gap-5 sm:gap-6 lg:gap-7
+              grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4
+              items-stretch
+            "
+          >
+            {vehicles.map((vehicle) => (
+              <Card
+                key={keyFor(vehicle)}
+                className="
+                  group relative h-full overflow-hidden
+                  rounded-2xl border border-gray-200 bg-white
+                  shadow-sm transition-all duration-300
+                  hover:shadow-2xl motion-safe:hover:-translate-y-1
+                  flex flex-col
+                "
+              >
+                {/* Image: fixed aspect so all cards match height */}
+                <div className="relative aspect-[16/10] overflow-hidden">
                   <Image
                     src={vehicle.image || "/placeholder.svg"}
                     alt={vehicle.name}
                     fill
-                    className="rounded object-cover"
+                    className="
+                      absolute inset-0 h-full w-full object-cover
+                      transition-transform duration-500
+                      group-hover:scale-[1.04]
+                    "
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                   />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-white text-base truncate">{vehicle.name}</p>
-                      <p className="text-white/70 text-xs">
-                        {vehicle.year} • {vehicle.transmission}
-                      </p>
-                    </div>
-                    <Badge
-                      className={
-                        vehicle.available
-                          ? "bg-green-500/20 text-green-400 border-green-500/30"
-                          : "bg-red-500/20 text-red-400 border-red-500/30"
-                      }
-                    >
-                      {vehicle.available ? "Available" : "Unavailable"}
+
+                  {/* Badges */}
+                  <div className="absolute top-2 left-2">
+                    <Badge className="bg-gray-900 text-white text-[11px] sm:text-xs font-medium px-2 py-0.5 rounded-full">
+                      {vehicle.category || "—"}
                     </Badge>
                   </div>
+                  <div className="absolute top-2 right-2">
+                    {vehicle.available ? (
+                      <Badge className="bg-green-500 text-white text-[11px] sm:text-xs font-semibold px-2 py-0.5 rounded-full">
+                        Available
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-red-500 text-white text-[11px] sm:text-xs font-semibold px-2 py-0.5 rounded-full">
+                        Unavailable
+                      </Badge>
+                    )}
+                  </div>
+                </div>
 
-                  {/* Details grid */}
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/80">
-                    <div className="rounded bg-white/5 px-2 py-1">
-                      <span className="opacity-80">Category: </span>
-                      <span className="font-medium">{vehicle.category || "—"}</span>
+                {/* Title + price */}
+                <CardHeader className="pb-2 sm:pb-3 px-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3
+                      title={vehicle.name}
+                      className="text-[15px] sm:text-base font-bold text-gray-900 truncate"
+                    >
+                      {vehicle.name}
+                    </h3>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg sm:text-xl font-extrabold text-green-700">
+                        ${vehicle.pricePerDay}
+                      </p>
+                      <p className="text-[11px] text-gray-500 font-medium">per day</p>
                     </div>
-                    <div className="rounded bg-white/5 px-2 py-1">
-                      <span className="opacity-80">Seats: </span>
-                      <span className="font-medium">{vehicle.passengers}</span>
+                  </div>
+                </CardHeader>
+
+                {/* Content area is capped to keep all cards equal height */}
+                <CardContent className="px-4 pt-0 pb-4 flex-1 flex flex-col justify-between">
+                  {/* Quick facts */}
+                  <div className="grid grid-cols-2 gap-3 text-[12px] sm:text-sm">
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <Users className="h-4 w-4 text-primary" />
+                      <span>{vehicle.passengers} seats</span>
                     </div>
-                    <div className="rounded bg-white/5 px-2 py-1">
-                      <span className="opacity-80">Fuel: </span>
-                      <span className="font-medium">{vehicle.fuel || "—"}</span>
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <Fuel className="h-4 w-4 text-secondary" />
+                      <span>{vehicle.fuel || "—"}</span>
                     </div>
-                    <div className="rounded bg-white/5 px-2 py-1">
-                      <span className="opacity-80">Price/day: </span>
-                      <span className="font-medium">${vehicle.pricePerDay}</span>
-                    </div>
-                    <div className="rounded bg-white/5 px-2 py-1 col-span-2">
-                      <span className="opacity-80">Features: </span>
-                      <span className="font-medium">
-                        {vehicle.features && vehicle.features.length > 0
-                          ? vehicle.features.join(", ")
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="rounded bg-white/5 px-2 py-1">
-                      <span className="opacity-80">Plate: </span>
-                      <span className="font-mono">{vehicle.licensePlate}</span>
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <Car className="h-4 w-4 text-accent" />
+                      <span>{vehicle.transmission || "—"}</span>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="mt-3 flex items-center gap-2">
+                  {/* Features (single-row to preserve height) */}
+                  <div className="mt-3">
+                    <p className="text-xs sm:text-sm font-bold text-gray-900 mb-2">Premium Features:</p>
+                    <div className="flex flex-wrap gap-2 min-h-[30px]">
+                      {vehicle.features && vehicle.features.length > 0 ? (
+                        <>
+                          {vehicle.features.slice(0, 2).map((feature, i) => (
+                            <Badge
+                              key={i}
+                              variant="outline"
+                              className="text-[11px] sm:text-xs font-medium border-gray-300 text-gray-700 px-2 py-0.5 rounded-full"
+                            >
+                              {feature}
+                            </Badge>
+                          ))}
+                          {vehicle.features.length > 2 && (
+                            <Badge
+                              variant="outline"
+                              className="text-[11px] sm:text-xs font-medium border-gray-300 text-gray-700 px-2 py-0.5 rounded-full"
+                            >
+                              +{vehicle.features.length - 2} more
+                            </Badge>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400 text-xs">No features listed</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions pinned to bottom for perfect alignment */}
+                  <div className="mt-4 flex gap-2 sm:gap-3">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => onEdit(vehicle)}
-                      className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 h-8 px-3"
+                      className="flex-1 text-gray-700 border-gray-300 hover:bg-gray-100 text-xs sm:text-sm"
                     >
                       <Edit className="h-3.5 w-3.5 mr-1" />
                       Edit
@@ -102,121 +163,18 @@ export default function VehicleList({
                       variant="outline"
                       size="sm"
                       onClick={() => onDelete(vehicle.id)}
-                      className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10 h-8 px-3"
+                      className="flex-1 text-red-600 border-red-300 hover:bg-red-50 text-xs sm:text-sm"
                     >
                       <Trash2 className="h-3.5 w-3.5 mr-1" />
                       Delete
                     </Button>
                   </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
-
-      {/* Desktop / tablet table */}
-      <div className="hidden sm:block">
-        <Card className="card-3d border-0 glass-effect-dark">
-          <CardHeader>
-            <CardTitle className="text-white text-2xl">
-              Fleet Overview ({vehicles.length} vehicles)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-white/10">
-                    <TableHead className="text-white/80 whitespace-nowrap">Vehicle</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Category</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Transmission</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Fuel</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Price/Day</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Passengers</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Features</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Status</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">License</TableHead>
-                    <TableHead className="text-white/80 whitespace-nowrap">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {vehicles.map((vehicle) => (
-                    <TableRow key={keyFor(vehicle)} className="border-white/10 hover:bg-white/5">
-                      <TableCell>
-                        <div className="flex items-center space-x-3">
-                          <div className="relative w-[50px] h-[40px]">
-                            <Image
-                              src={vehicle.image || "/placeholder.svg"}
-                              alt={vehicle.name}
-                              fill
-                              className="rounded object-cover"
-                            />
-                          </div>
-                          <div>
-                            <p className="font-medium text-white">{vehicle.name}</p>
-                            <p className="text-sm text-white/70">
-                              {vehicle.year} • {vehicle.transmission}
-                            </p>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="border-white/20 text-white/80">
-                          {vehicle.category || "—"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-white/80">{vehicle.transmission || "—"}</TableCell>
-                      <TableCell className="text-white/80">{vehicle.fuel || "—"}</TableCell>
-                      <TableCell className="font-medium text-white">${vehicle.pricePerDay}</TableCell>
-                      <TableCell className="text-white/80">{vehicle.passengers}</TableCell>
-                      <TableCell className="text-white/80">
-                        {vehicle.features && vehicle.features.length > 0
-                          ? vehicle.features.join(", ")
-                          : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className={
-                            vehicle.available
-                              ? "bg-green-500/20 text-green-400 border-green-500/30"
-                              : "bg-red-500/20 text-red-400 border-red-500/30"
-                          }
-                        >
-                          {vehicle.available ? "Available" : "Unavailable"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm text-white/80">
-                        {vehicle.licensePlate}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onEdit(vehicle)}
-                            className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onDelete(vehicle.id)}
-                            className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </>
+    </section>
   );
 }
