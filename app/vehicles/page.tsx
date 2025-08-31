@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Car, Users, Fuel, Calendar, Filter, Eye, Phone } from "lucide-react";
+import { Car, Users, Fuel, Filter, Eye, Phone } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { supabase, STORAGE_BUCKET } from "@/lib/supabaseClient";
@@ -23,7 +23,8 @@ export default function VehiclesPage() {
       const { data, error } = await supabase
         .from("vehicles")
         .select(
-          "id, registration_number, title, brand, model, year, rental_price, image_path, available, category, passengers, transmission, fuel, features, created_at"
+          `id, registration_number, title, brand, model, year, rental_price,
+           image_path, public_url, available, category, passengers, transmission, fuel, features, created_at`
         )
         .order("created_at", { ascending: false });
 
@@ -34,13 +35,15 @@ export default function VehiclesPage() {
 
       const mapped: Vehicle[] =
         (data || []).map((v: any) => {
-          let publicUrl: string | null = null;
-          if (v.image_path) {
+          // ✅ Always resolve image, fallback if public_url is missing
+          let img: string | null = v.public_url ?? null;
+          if (!img && v.image_path) {
             const { data: pub } = supabase.storage
               .from(STORAGE_BUCKET)
               .getPublicUrl(v.image_path);
-            publicUrl = pub?.publicUrl ?? null;
+            img = pub?.publicUrl ?? null;
           }
+
           return {
             id: v.id,
             name: v.title,
@@ -50,7 +53,7 @@ export default function VehiclesPage() {
             pricePerDay: Number(v.rental_price ?? 0),
             licensePlate: v.registration_number ?? "",
             available: Boolean(v.available),
-            image: publicUrl,
+            image: img, // ✅ fixed: now always has a usable URL
             imagePath: v.image_path ?? null,
             category: v.category ?? "",
             passengers: Number(v.passengers ?? 0),

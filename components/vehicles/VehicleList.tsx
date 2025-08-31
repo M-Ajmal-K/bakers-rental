@@ -27,8 +27,12 @@ export default function VehicleList({
             <div className="w-20 h-20 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4">
               <Car className="h-10 w-10 text-gray-800" />
             </div>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">No vehicles found</h3>
-            <p className="text-gray-500 text-base">Start by adding your first vehicle.</p>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">
+              No vehicles found
+            </h3>
+            <p className="text-gray-500 text-base">
+              Start by adding your first vehicle.
+            </p>
           </div>
         ) : (
           <div
@@ -49,10 +53,10 @@ export default function VehicleList({
                   flex flex-col
                 "
               >
-                {/* Image: fixed aspect so all cards match height */}
+                {/* Image with fixed aspect ratio so all cards line up */}
                 <div className="relative aspect-[16/10] overflow-hidden">
                   <Image
-                    src={vehicle.image || "/placeholder.svg"}
+                    src={vehicle.image ?? "/placeholder.svg"} // ✅ use public_url directly
                     alt={vehicle.name}
                     fill
                     className="
@@ -63,12 +67,13 @@ export default function VehicleList({
                     sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                   />
 
-                  {/* Badges */}
+                  {/* Category badge */}
                   <div className="absolute top-2 left-2">
                     <Badge className="bg-gray-900 text-white text-[11px] sm:text-xs font-medium px-2 py-0.5 rounded-full">
                       {vehicle.category || "—"}
                     </Badge>
                   </div>
+                  {/* Availability badge */}
                   <div className="absolute top-2 right-2">
                     {vehicle.available ? (
                       <Badge className="bg-green-500 text-white text-[11px] sm:text-xs font-semibold px-2 py-0.5 rounded-full">
@@ -82,7 +87,7 @@ export default function VehicleList({
                   </div>
                 </div>
 
-                {/* Title + price */}
+                {/* Title + Price */}
                 <CardHeader className="pb-2 sm:pb-3 px-4">
                   <div className="flex items-center justify-between gap-3">
                     <h3
@@ -95,12 +100,14 @@ export default function VehicleList({
                       <p className="text-lg sm:text-xl font-extrabold text-green-700">
                         ${vehicle.pricePerDay}
                       </p>
-                      <p className="text-[11px] text-gray-500 font-medium">per day</p>
+                      <p className="text-[11px] text-gray-500 font-medium">
+                        per day
+                      </p>
                     </div>
                   </div>
                 </CardHeader>
 
-                {/* Content area is capped to keep all cards equal height */}
+                {/* Content */}
                 <CardContent className="px-4 pt-0 pb-4 flex-1 flex flex-col justify-between">
                   {/* Quick facts */}
                   <div className="grid grid-cols-2 gap-3 text-[12px] sm:text-sm">
@@ -118,9 +125,11 @@ export default function VehicleList({
                     </div>
                   </div>
 
-                  {/* Features (single-row to preserve height) */}
+                  {/* Features (single row) */}
                   <div className="mt-3">
-                    <p className="text-xs sm:text-sm font-bold text-gray-900 mb-2">Premium Features:</p>
+                    <p className="text-xs sm:text-sm font-bold text-gray-900 mb-2">
+                      Premium Features:
+                    </p>
                     <div className="flex flex-wrap gap-2 min-h-[30px]">
                       {vehicle.features && vehicle.features.length > 0 ? (
                         <>
@@ -143,12 +152,14 @@ export default function VehicleList({
                           )}
                         </>
                       ) : (
-                        <span className="text-gray-400 text-xs">No features listed</span>
+                        <span className="text-gray-400 text-xs">
+                          No features listed
+                        </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Actions pinned to bottom for perfect alignment */}
+                  {/* Admin actions */}
                   <div className="mt-4 flex gap-2 sm:gap-3">
                     <Button
                       variant="outline"

@@ -12,7 +12,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Car, Plus, LogOut, AlertTriangle } from "lucide-react";
 
@@ -52,7 +52,8 @@ export default function VehicleManagement() {
       const { data, error } = await supabase
         .from("vehicles")
         .select(
-          "id, registration_number, title, brand, model, year, rental_price, image_path, available, created_at, category, passengers, transmission, fuel, features"
+          `id, registration_number, title, brand, model, year, rental_price, 
+           image_path, public_url, available, created_at, category, passengers, transmission, fuel, features`
         )
         .order("created_at", { ascending: false });
 
@@ -62,34 +63,27 @@ export default function VehicleManagement() {
       }
 
       const mapped: Vehicle[] =
-        (data || []).map((v: any) => {
-          let publicUrl: string | null = null;
-          if (v.image_path) {
-            const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(v.image_path);
-            publicUrl = pub?.publicUrl ?? null;
-          }
-          return {
-            id: v.id,
-            name: v.title,
-            brand: v.brand ?? "",
-            model: v.model ?? "",
-            year: Number(v.year ?? 0),
-            pricePerDay: Number(v.rental_price ?? 0),
-            licensePlate: v.registration_number ?? "",
-            available: Boolean(v.available),
-            image: publicUrl,
-            imagePath: v.image_path ?? null,
-            category: v.category ?? "",
-            passengers: Number(v.passengers ?? 0),
-            transmission: v.transmission ?? "",
-            fuel: v.fuel ?? "",
-            features: Array.isArray(v.features)
-              ? v.features
-              : v.features
-              ? String(v.features).split(",").map((f) => f.trim())
-              : [],
-          };
-        }) || [];
+        (data || []).map((v: any) => ({
+          id: v.id,
+          name: v.title,
+          brand: v.brand ?? "",
+          model: v.model ?? "",
+          year: Number(v.year ?? 0),
+          pricePerDay: Number(v.rental_price ?? 0),
+          licensePlate: v.registration_number ?? "",
+          available: Boolean(v.available),
+          image: v.public_url ?? null, // ✅ direct from DB
+          imagePath: v.image_path ?? null,
+          category: v.category ?? "",
+          passengers: Number(v.passengers ?? 0),
+          transmission: v.transmission ?? "",
+          fuel: v.fuel ?? "",
+          features: Array.isArray(v.features)
+            ? v.features
+            : v.features
+            ? String(v.features).split(",").map((f) => f.trim())
+            : [],
+        })) || [];
 
       setVehicles(mapped);
     };
@@ -163,6 +157,7 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
         image_path,
+        public_url: publicUrl, // ✅ Save public_url too
         available: formData.available,
         category: formData.category,
         passengers: Number(formData.passengers || 0),
@@ -173,10 +168,17 @@ export default function VehicleManagement() {
           : [],
       };
 
-      const { data, error } = await supabase.from("vehicles").insert(payload).select().single();
+      console.log("Insert payload:", payload);
+
+      const { data, error } = await supabase
+        .from("vehicles")
+        .insert(payload)
+        .select()
+        .single();
+
       if (error) {
-        console.error("[Vehicles] insert error:", error);
-        alert(error.message);
+        console.error("[Vehicles] insert error:", JSON.stringify(error, null, 2));
+        alert(error?.message || "Insert failed, check console for details");
         return;
       }
 
@@ -189,7 +191,7 @@ export default function VehicleManagement() {
         pricePerDay: Number(data.rental_price ?? 0),
         licensePlate: data.registration_number ?? "",
         available: Boolean(data.available),
-        image: publicUrl,
+        image: data.public_url ?? publicUrl ?? null, // ✅ prefer DB value
         imagePath: data.image_path ?? null,
         category: data.category ?? "",
         passengers: Number(data.passengers ?? 0),
@@ -264,8 +266,13 @@ export default function VehicleManagement() {
           : [],
       };
       if (newImagePath) payload.image_path = newImagePath;
+      if (newPublicUrl) payload.public_url = newPublicUrl;
 
-      const { error } = await supabase.from("vehicles").update(payload).eq("id", editingVehicle.id);
+      const { error } = await supabase
+        .from("vehicles")
+        .update(payload)
+        .eq("id", editingVehicle.id);
+
       if (error) {
         console.error("[Vehicles] update error:", error);
         alert(error.message);
@@ -278,7 +285,7 @@ export default function VehicleManagement() {
         brand: formData.brand,
         model: formData.model,
         year: Number.parseInt(formData.year || "0"),
-        pricePerDay: Number.parseFloat(formData.pricePerDay || "0"),
+        pricePerDay: Number(formData.pricePerDay || "0"),
         licensePlate: formData.licensePlate,
         available: formData.available,
         image: newPublicUrl,
@@ -289,10 +296,14 @@ export default function VehicleManagement() {
         fuel: formData.fuel,
         features: formData.features
           ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : (Array.isArray(editingVehicle.features) ? editingVehicle.features : []),
+          : Array.isArray(editingVehicle.features)
+          ? editingVehicle.features
+          : [],
       };
 
-      setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)));
+      setVehicles((prev) =>
+        prev.map((v) => (v.id === editingVehicle.id ? updated : v))
+      );
       setIsEditDialogOpen(false);
       setEditingVehicle(null);
       resetForm();
@@ -333,13 +344,20 @@ export default function VehicleManagement() {
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 sm:space-x-4">
-              <Link href="/admin/dashboard" className="flex items-center space-x-2 sm:space-x-3 group">
+              <Link
+                href="/admin/dashboard"
+                className="flex items-center space-x-2 sm:space-x-3 group"
+              >
                 <div className="w-10 h-10 sm:w-12 sm:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
                   <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
                 <div>
-                  <span className="text-xl sm:text-2xl font-bold text-white">Bakers Rentals</span>
-                  <p className="text-white/80 text-xs sm:text-sm">Vehicle Management</p>
+                  <span className="text-xl sm:text-2xl font-bold text-white">
+                    Bakers Rentals
+                  </span>
+                  <p className="text-white/80 text-xs sm:text-sm">
+                    Vehicle Management
+                  </p>
                 </div>
               </Link>
             </div>
@@ -360,7 +378,8 @@ export default function VehicleManagement() {
         <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 px-4 py-3">
           <div className="container mx-auto max-w-7xl flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" />
-            Supabase is not configured. Set <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+            Supabase is not configured. Set{" "}
+            <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
             <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
           </div>
         </div>
@@ -374,7 +393,9 @@ export default function VehicleManagement() {
               <h1 className="text-2xl sm:text-5xl font-bold text-white mb-2 sm:mb-4 drop-shadow-lg">
                 Vehicle Fleet Management
               </h1>
-              <p className="text-white/80 text-sm sm:text-xl">Manage your premium vehicle collection</p>
+              <p className="text-white/80 text-sm sm:text-xl">
+                Manage your premium vehicle collection
+              </p>
             </div>
 
             <Dialog
@@ -399,9 +420,15 @@ export default function VehicleManagement() {
               >
                 <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
                 <DialogHeader>
-                  <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
-                  <DialogDescription id="add-vehicle-desc" className="text-white/80">
-                    Upload a photo and fill in the vehicle details. Fields marked * are required.
+                  <DialogTitle className="text-white text-xl sm:text-2xl">
+                    Add New Vehicle
+                  </DialogTitle>
+                  <DialogDescription
+                    id="add-vehicle-desc"
+                    className="text-white/80"
+                  >
+                    Upload a photo and fill in the vehicle details. Fields
+                    marked * are required.
                   </DialogDescription>
                 </DialogHeader>
                 <VehicleForm
@@ -414,7 +441,7 @@ export default function VehicleManagement() {
             </Dialog>
           </div>
 
-          {/* ✅ Single source of truth for lists */}
+          {/* Vehicle list */}
           <VehicleList
             vehicles={vehicles}
             onEdit={openEditDialog}
@@ -438,8 +465,13 @@ export default function VehicleManagement() {
             >
               <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
-                <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
-                <DialogDescription id="edit-vehicle-desc" className="text-white/80">
+                <DialogTitle className="text-white text-xl sm:text-2xl">
+                  Edit Vehicle
+                </DialogTitle>
+                <DialogDescription
+                  id="edit-vehicle-desc"
+                  className="text-white/80"
+                >
                   Update details or upload a new photo for this vehicle.
                 </DialogDescription>
               </DialogHeader>
