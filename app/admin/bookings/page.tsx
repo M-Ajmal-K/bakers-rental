@@ -15,114 +15,32 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react"
+import { supabase } from "@/lib/supabaseClient"
 
-// --- Mock booking data ---
-const initialBookings = [
-  {
-    id: 1,
-    bookingRef: "BK-2024-001",
-    customerName: "John Smith",
-    customerEmail: "john.smith@email.com",
-    customerPhone: "+679 123 4567",
-    vehicleId: 1,
-    vehicleName: "Toyota RAV4",
-    pickupDate: "2024-08-22",
-    returnDate: "2024-08-25",
-    pickupLocation: "Nadi Airport",
-    dropoffLocation: "Suva City Center",
-    totalAmount: 255,
-    status: "confirmed",
-    createdAt: "2024-08-20T10:30:00Z",
-    notes: "Need child seat",
-  },
-  {
-    id: 2,
-    bookingRef: "BK-2024-002",
-    customerName: "Sarah Johnson",
-    customerEmail: "sarah.j@email.com",
-    customerPhone: "+679 234 5678",
-    vehicleId: 3,
-    vehicleName: "Nissan X-Trail",
-    pickupDate: "2024-08-23",
-    returnDate: "2024-08-26",
-    pickupLocation: "Denarau Island",
-    dropoffLocation: "Denarau Island",
-    totalAmount: 270,
-    status: "pending",
-    createdAt: "2024-08-21T14:15:00Z",
-    notes: "",
-  },
-  {
-    id: 3,
-    bookingRef: "BK-2024-003",
-    customerName: "Mike Wilson",
-    customerEmail: "mike.wilson@email.com",
-    customerPhone: "+679 345 6789",
-    vehicleId: 4,
-    vehicleName: "Toyota Hiace",
-    pickupDate: "2024-08-18",
-    returnDate: "2024-08-20",
-    pickupLocation: "Suva City Center",
-    dropoffLocation: "Nadi Airport",
-    totalAmount: 220,
-    status: "completed",
-    createdAt: "2024-08-16T09:45:00Z",
-    notes: "Group of 10 people",
-  },
-  {
-    id: 4,
-    bookingRef: "BK-2024-004",
-    customerName: "Emma Davis",
-    customerEmail: "emma.davis@email.com",
-    customerPhone: "+679 456 7890",
-    vehicleId: 8,
-    vehicleName: "Toyota Corolla",
-    pickupDate: "2024-08-24",
-    returnDate: "2024-08-28",
-    pickupLocation: "Coral Coast",
-    dropoffLocation: "Lautoka",
-    totalAmount: 240,
-    status: "confirmed",
-    createdAt: "2024-08-22T16:20:00Z",
-    notes: "First time in Fiji",
-  },
-  {
-    id: 5,
-    bookingRef: "BK-2024-005",
-    customerName: "David Brown",
-    customerEmail: "david.brown@email.com",
-    customerPhone: "+679 567 8901",
-    vehicleId: 2,
-    vehicleName: "Honda Odyssey",
-    pickupDate: "2024-08-25",
-    returnDate: "2024-08-27",
-    pickupLocation: "Pacific Harbour",
-    dropoffLocation: "Savusavu",
-    totalAmount: 240,
-    status: "cancelled",
-    createdAt: "2024-08-19T11:10:00Z",
-    notes: "Family vacation cancelled",
-  },
-]
+/* -------------------------------------------------------------------------- */
+/*                             Types / Status Map                              */
+/* -------------------------------------------------------------------------- */
 
 const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const
-const statusColors = {
+const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
   confirmed: "bg-green-100 text-green-800",
   completed: "bg-blue-100 text-blue-800",
   cancelled: "bg-red-100 text-red-800",
+  active: "bg-indigo-100 text-indigo-800",
 }
 
 type BookingStatus = typeof bookingStatuses[number]
 
 interface Booking {
-  id: number
+  id: string
   bookingRef: string
   customerName: string
   customerEmail: string
   customerPhone: string
-  vehicleId: number
+  vehicleId: string
   vehicleName: string
+  vehiclePlate: string
   pickupDate: string
   returnDate: string
   pickupLocation: string
@@ -133,7 +51,7 @@ interface Booking {
   notes: string
 }
 
-/* ---------------- Mobile card for bookings (no logic changed) ---------------- */
+/* ---------------- Mobile card for bookings (UI unchanged) ----------------- */
 const MobileBookingCard = memo(function MobileBookingCard({
   booking,
   onView,
@@ -145,7 +63,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
   booking: Booking
   onView: (b: Booking) => void
   onEdit: (b: Booking) => void
-  onDelete: (id: number) => void
+  onDelete: (id: string) => void
   getStatusBadge: (s: string) => JSX.Element
   calculateDays: (a: string, b: string) => number
 }) {
@@ -170,6 +88,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
           <div className="bg-white/5 rounded p-2">
             <p className="text-white/60">Vehicle</p>
             <p className="font-medium text-white">{booking.vehicleName}</p>
+            {booking.vehiclePlate && <p className="text-white/70 text-xs mt-0.5">Plate: {booking.vehiclePlate}</p>}
           </div>
           <div className="bg-white/5 rounded p-2">
             <p className="text-white/60">Amount</p>
@@ -224,16 +143,23 @@ const MobileBookingCard = memo(function MobileBookingCard({
   )
 })
 
+/* -------------------------------------------------------------------------- */
+/*                           Main content (admin UI)                           */
+/* -------------------------------------------------------------------------- */
+
 function BookingManagementContent() {
   const router = useRouter()
-  const [bookings, setBookings] = useState<Booking[]>(initialBookings)
-  const [filteredBookings, setFilteredBookings] = useState<Booking[]>(initialBookings)
+
+  const [bookings, setBookings] = useState<Booking[]>([])
+  const [filteredBookings, setFilteredBookings] = useState<Booking[]>([])
   const [statusFilter, setStatusFilter] = useState<BookingStatus | "all">("all")
   const [searchTerm, setSearchTerm] = useState("")
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
   const [editFormData, setEditFormData] = useState({ status: "", notes: "" })
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Ensure fade-ins are visible
   useEffect(() => {
@@ -251,17 +177,93 @@ function BookingManagementContent() {
     router.push("/admin/login")
   }
 
-  // Filter bookings on changes
+  /* --------------------------- Fetch real bookings -------------------------- */
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        // 1) Pull bookings
+        const { data: rawBookings } = await supabase
+          .from("bookings")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .throwOnError()
+
+        const rows = rawBookings || []
+        const vehicleIds = Array.from(new Set(rows.map((r: any) => r.vehicle_id).filter(Boolean)))
+
+        // 2) Pull vehicle titles + registration_number
+        let vehicleMap: Record<string, { title: string; plate: string }> = {}
+        if (vehicleIds.length > 0) {
+          const { data: vehData } = await supabase
+            .from("vehicles")
+            .select("id, title, registration_number")
+            .in("id", vehicleIds)
+            .throwOnError()
+
+          vehicleMap = (vehData || []).reduce((acc: Record<string, { title: string; plate: string }>, v: any) => {
+            acc[v.id] = { title: v.title || "(Untitled Vehicle)", plate: v.registration_number ?? "" }
+            return acc
+          }, {})
+        }
+
+        // 3) Map DB rows to UI Booking shape
+        const mapped: Booking[] = rows.map((r: any) => {
+          const id: string = r.id
+          const created = r.created_at || new Date().toISOString()
+          const ref = `BK-${format(new Date(created), "yyyy")}-${String(id).slice(0, 6).toUpperCase()}`
+          const vehMeta = vehicleMap[r.vehicle_id] || { title: "(Unknown Vehicle)", plate: "" }
+          return {
+            id,
+            bookingRef: ref,
+            customerName: r.customer_name ?? "",
+            customerEmail: r.customer_email ?? "",
+            customerPhone: r.customer_phone ?? "",
+            vehicleId: r.vehicle_id,
+            vehicleName: vehMeta.title,
+            vehiclePlate: vehMeta.plate,
+            pickupDate: r.start_date,
+            returnDate: r.end_date,
+            pickupLocation: r.pickup_location ?? "",
+            dropoffLocation: r.dropoff_location ?? "",
+            totalAmount: Number(r.total_price ?? 0),
+            status: r.status ?? "pending",
+            createdAt: created,
+            notes: "",
+          }
+        })
+
+        setBookings(mapped)
+        setFilteredBookings(mapped)
+      } catch (err: any) {
+        const msg =
+          err?.message ||
+          "Failed to load bookings. If Row Level Security is enabled, ensure a SELECT policy allows reading bookings."
+        console.error("[Admin/Bookings] fetch bookings error detail:", err)
+        setLoadError(msg)
+        setBookings([])
+        setFilteredBookings([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
+  // Filter bookings on changes (include plate in search)
   useEffect(() => {
     let filtered = bookings
-    if (statusFilter !== "all") filtered = filtered.filter((b) => b.status === statusFilter)
+    if (statusFilter !== "all") filtered = filtered.filter((b) => String(b.status) === statusFilter)
     if (searchTerm) {
       const q = searchTerm.toLowerCase()
       filtered = filtered.filter(
         (b) =>
           b.customerName.toLowerCase().includes(q) ||
           b.bookingRef.toLowerCase().includes(q) ||
-          b.vehicleName.toLowerCase().includes(q),
+          b.vehicleName.toLowerCase().includes(q) ||
+          b.vehiclePlate.toLowerCase().includes(q),
       )
     }
     setFilteredBookings(filtered)
@@ -278,6 +280,7 @@ function BookingManagementContent() {
     setIsEditDialogOpen(true)
   }
 
+  // Local-only (MVP)
   const handleUpdateBooking = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedBooking) return
@@ -287,14 +290,15 @@ function BookingManagementContent() {
     setSelectedBooking(null)
   }
 
-  const handleDeleteBooking = (id: number) => {
-    if (confirm("Are you sure you want to delete this booking?")) {
+  // Local-only (MVP)
+  const handleDeleteBooking = (id: string) => {
+    if (confirm("Are you sure you want to delete this booking (local-only)?")) {
       setBookings((prev) => prev.filter((b) => b.id !== id))
     }
   }
 
   const getStatusBadge = (status: string) => {
-    const colorClass = (statusColors as any)[status] || "bg-gray-100 text-gray-800"
+    const colorClass = statusColors[status] || "bg-gray-100 text-gray-800"
     return (
       <Badge className={`${colorClass} capitalize`} variant="secondary">
         {status}
@@ -341,8 +345,19 @@ function BookingManagementContent() {
         <div className="container mx-auto max-w-7xl">
           <div className="fade-in-up mb-8 md:mb-12">
             <h1 className="text-3xl md:text-5xl font-bold text-white mb-2 md:mb-4 drop-shadow-lg">Booking Management</h1>
-            <p className="text-white/80 text-base md:text-xl">View and manage customer reservations</p>
+            <p className="text-white/80 text-base md:text-xl">
+              {loading ? "Loading bookings…" : "View and manage customer reservations"}
+            </p>
           </div>
+
+          {/* Optional inline error */}
+          {loadError && (
+            <div className="fade-in-up mb-6">
+              <Card className="card-3d border-0 glass-effect-dark">
+                <CardContent className="p-4 text-sm text-red-200">{loadError}</CardContent>
+              </Card>
+            </div>
+          )}
 
           {/* Filters */}
           <div className="fade-in-up mb-6 md:mb-8" style={{ animationDelay: "0.2s" }}>
@@ -361,7 +376,7 @@ function BookingManagementContent() {
                     </Label>
                     <Input
                       id="search"
-                      placeholder="Search by customer, ref, or vehicle..."
+                      placeholder="Search by customer, ref, vehicle, or plate..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="mt-2 h-10 md:h-11 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
@@ -402,7 +417,7 @@ function BookingManagementContent() {
                 calculateDays={calculateDays}
               />
             ))}
-            {filteredBookings.length === 0 && (
+            {!loading && filteredBookings.length === 0 && (
               <div className="text-center py-12">
                 <Calendar className="h-12 w-12 text-white/40 mx-auto mb-3" />
                 <h3 className="text-lg font-semibold text-white mb-1">No bookings found</h3>
@@ -415,7 +430,9 @@ function BookingManagementContent() {
           <div className="fade-in-up hidden md:block" style={{ animationDelay: "0.4s" }}>
             <Card className="card-3d border-0 glass-effect-dark">
               <CardHeader>
-                <CardTitle className="text-white text-2xl">All Bookings ({filteredBookings.length})</CardTitle>
+                <CardTitle className="text-white text-2xl">
+                  {loading ? "Loading…" : `All Bookings (${filteredBookings.length})`}
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
@@ -425,6 +442,7 @@ function BookingManagementContent() {
                         <TableHead className="text-white/80">Booking Ref</TableHead>
                         <TableHead className="text-white/80">Customer</TableHead>
                         <TableHead className="text-white/80">Vehicle</TableHead>
+                        <TableHead className="text-white/80">Plate</TableHead>
                         <TableHead className="text-white/80">Dates</TableHead>
                         <TableHead className="text-white/80">Amount</TableHead>
                         <TableHead className="text-white/80">Status</TableHead>
@@ -450,6 +468,9 @@ function BookingManagementContent() {
                           </TableCell>
                           <TableCell>
                             <p className="font-medium text-white">{booking.vehicleName}</p>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-white">{booking.vehiclePlate || "-"}</p>
                           </TableCell>
                           <TableCell>
                             <div className="text-sm">
@@ -499,7 +520,7 @@ function BookingManagementContent() {
                   </Table>
                 </div>
 
-                {filteredBookings.length === 0 && (
+                {!loading && filteredBookings.length === 0 && (
                   <div className="text-center py-12">
                     <Calendar className="h-16 w-16 text-white/40 mx-auto mb-4" />
                     <h3 className="text-xl font-semibold text-white mb-2">No bookings found</h3>
@@ -516,8 +537,11 @@ function BookingManagementContent() {
               forceMount
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20 text-white"
             >
+              {/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */}
+              {/*                        added `text-white`                    */}
+              {/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */}
               <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-xl md:text-2xl">Booking Details</DialogTitle>
@@ -569,6 +593,11 @@ function BookingManagementContent() {
                         <p>
                           <span className="text-white/70">Vehicle:</span> {selectedBooking.vehicleName}
                         </p>
+                        {selectedBooking.vehiclePlate && (
+                          <p>
+                            <span className="text-white/70">Plate:</span> {selectedBooking.vehiclePlate}
+                          </p>
+                        )}
                         <p>
                           <span className="text-white/70">Pickup:</span>{" "}
                           {format(new Date(selectedBooking.pickupDate), "PPP")}
@@ -601,7 +630,7 @@ function BookingManagementContent() {
                   {selectedBooking.notes && (
                     <div>
                       <h3 className="font-semibold text-white mb-3">Special Notes</h3>
-                      <p className="text-sm text-white/70 bg-white/10 p-3 rounded">{selectedBooking.notes}</p>
+                      <p className="text-sm text-white bg-white/10 p-3 rounded">{selectedBooking.notes}</p>
                     </div>
                   )}
                 </div>
@@ -609,7 +638,7 @@ function BookingManagementContent() {
             </DialogContent>
           </Dialog>
 
-          {/* Edit Dialog */}
+          {/* Edit Dialog (local state only for now) */}
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             <DialogContent
               forceMount
@@ -690,14 +719,13 @@ function BookingManagementContent() {
   )
 }
 
-// -------- Default export with built-in auth check (replaces AdminAuthGuard) --------
+/* -------- Default export with built-in auth check (replaces AdminAuthGuard) -------- */
 export default function BookingManagementPage() {
   const router = useRouter()
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(false)
 
   useEffect(() => {
-    // Client-only check
     const ok = typeof window !== "undefined" && localStorage.getItem("adminAuth") === "true"
     setAuthed(ok)
     setReady(true)
