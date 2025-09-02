@@ -16,18 +16,8 @@ import { Car, CalendarIcon, MapPin, User, CheckCircle, Sparkles, Edit } from "lu
 import Link from "next/link"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
-
-// Mock vehicle data (same as vehicles page)
-const vehicles = [
-  { id: 1, name: "Toyota RAV4", category: "SUV", pricePerDay: 85, available: true },
-  { id: 2, name: "Honda Odyssey", category: "Van", pricePerDay: 120, available: false, nextAvailable: "2024-08-25" },
-  { id: 3, name: "Nissan X-Trail", category: "SUV", pricePerDay: 90, available: true },
-  { id: 4, name: "Toyota Hiace", category: "Van", pricePerDay: 110, available: true },
-  { id: 5, name: "Suzuki Swift", category: "Compact", pricePerDay: 55, available: false, nextAvailable: "2024-08-23" },
-  { id: 6, name: "Ford Ranger", category: "Pickup", pricePerDay: 95, available: true },
-  { id: 7, name: "Hyundai Tucson", category: "SUV", pricePerDay: 80, available: false, nextAvailable: "2024-08-26" },
-  { id: 8, name: "Toyota Corolla", category: "Compact", pricePerDay: 60, available: true },
-]
+import { supabase } from "@/lib/supabaseClient"
+import { Vehicle } from "@/components/vehicles/VehicleTypes"
 
 const locations = [
   "Nadi Airport",
@@ -44,6 +34,7 @@ export default function BookingPage() {
   const searchParams = useSearchParams()
   const preselectedVehicle = searchParams.get("vehicle")
 
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [pickupDate, setPickupDate] = useState<Date>()
   const [returnDate, setReturnDate] = useState<Date>()
   const [selectedVehicle, setSelectedVehicle] = useState(preselectedVehicle || "")
@@ -58,11 +49,50 @@ export default function BookingPage() {
   const [showSummary, setShowSummary] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
 
+  // Load real vehicles from Supabase
+  useEffect(() => {
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("id, title, category, rental_price, available")
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("[BookingPage] fetch error:", error)
+        return
+      }
+
+      const mapped: Vehicle[] =
+        (data || []).map((v: any) => ({
+          id: v.id,
+          name: v.title,
+          brand: "",
+          model: "",
+          category: v.category ?? "",
+          pricePerDay: Number(v.rental_price ?? 0),
+          available: Boolean(v.available),
+          passengers: 0,
+          transmission: "",
+          fuel: "",
+          image: null,
+          imagePath: null,
+          licensePlate: "",
+          features: [],
+          year: 0,
+        })) || []
+
+      setVehicles(mapped)
+    }
+
+    load()
+  }, [])
+
+  // Keep your animation on scroll
   useEffect(() => {
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up")
       elements.forEach((el) => {
-        const rect = el.getBoundingClientRect()
+        const rect = (el as HTMLElement).getBoundingClientRect()
         if (rect.top < window.innerHeight - 100) {
           el.classList.add("animate")
         }
@@ -117,10 +147,11 @@ export default function BookingPage() {
     setTimeout(() => {
       setShowSuccess(false)
       setShowSummary(false)
-      // Reset form or redirect
+      // Reset form or redirect if you want
     }, 3000)
   }
 
+  /* ---------------- SUCCESS SCREEN ---------------- */
   if (showSuccess) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -148,6 +179,7 @@ export default function BookingPage() {
     )
   }
 
+  /* ---------------- SUMMARY SCREEN ---------------- */
   if (showSummary) {
     return (
       <div className="min-h-screen bg-background">
@@ -317,6 +349,7 @@ export default function BookingPage() {
     )
   }
 
+  /* ---------------- MAIN FORM ---------------- */
   return (
     <div className="min-h-screen bg-background">
       <nav className="sticky top-0 z-50 glass-effect border-b border-border/20">
