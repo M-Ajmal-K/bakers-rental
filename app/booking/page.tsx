@@ -1,23 +1,25 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useEffect } from "react"
-import { useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Car, CalendarIcon, MapPin, User, CheckCircle, Sparkles, Edit } from "lucide-react"
-import Link from "next/link"
-import { format } from "date-fns"
-import { cn } from "@/lib/utils"
-import { supabase } from "@/lib/supabaseClient"
-import { Vehicle } from "@/components/vehicles/VehicleTypes"
+import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Car, CalendarIcon, MapPin, User, CheckCircle, Sparkles, Edit } from "lucide-react";
+import Link from "next/link";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabaseClient";
+import { Vehicle } from "@/components/vehicles/VehicleTypes";
+
+/* -------------------------------- Helpers -------------------------------- */
 
 const locations = [
   "Nadi Airport",
@@ -28,38 +30,70 @@ const locations = [
   "Lautoka",
   "Savusavu",
   "Labasa",
-]
+];
+
+type BookedRange = { start: Date; end: Date };
+
+function atStartOfDay(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function isSameOrBefore(a: Date, b: Date) {
+  return atStartOfDay(a).getTime() <= atStartOfDay(b).getTime();
+}
+
+function dateInRange(d: Date, r: BookedRange) {
+  const x = atStartOfDay(d).getTime();
+  return x >= atStartOfDay(r.start).getTime() && x <= atStartOfDay(r.end).getTime();
+}
+
+function rangesOverlap(aStart: Date, aEnd: Date, r: BookedRange) {
+  const s1 = atStartOfDay(aStart).getTime();
+  const e1 = atStartOfDay(aEnd).getTime();
+  const s2 = atStartOfDay(r.start).getTime();
+  const e2 = atStartOfDay(r.end).getTime();
+  return s1 <= e2 && s2 <= e1;
+}
+
+/* -------------------------------- Component -------------------------------- */
 
 export default function BookingPage() {
-  const searchParams = useSearchParams()
-  const preselectedVehicle = searchParams.get("vehicle")
+  const searchParams = useSearchParams();
+  const preselectedVehicle = searchParams.get("vehicle");
 
-  const [vehicles, setVehicles] = useState<Vehicle[]>([])
-  const [pickupDate, setPickupDate] = useState<Date>()
-  const [returnDate, setReturnDate] = useState<Date>()
-  const [selectedVehicle, setSelectedVehicle] = useState(preselectedVehicle || "")
-  const [pickupLocation, setPickupLocation] = useState("")
-  const [dropoffLocation, setDropoffLocation] = useState("")
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [pickupDate, setPickupDate] = useState<Date>();
+  const [returnDate, setReturnDate] = useState<Date>();
+  const [selectedVehicle, setSelectedVehicle] = useState(preselectedVehicle || "");
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [dropoffLocation, setDropoffLocation] = useState("");
   const [customerInfo, setCustomerInfo] = useState({
     name: "",
     phone: "",
     email: "",
     notes: "",
-  })
-  const [showSummary, setShowSummary] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  });
+  const [showSummary, setShowSummary] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
-  // Load real vehicles from Supabase
+  // availability state
+  const [bookedRanges, setBookedRanges] = useState<BookedRange[]>([]);
+  const [loadingAvail, setLoadingAvail] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  /* ---------------- Load real vehicles from Supabase ---------------- */
   useEffect(() => {
     const load = async () => {
       const { data, error } = await supabase
         .from("vehicles")
         .select("id, title, category, rental_price, available")
-        .order("created_at", { ascending: false })
+        .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("[BookingPage] fetch error:", error)
-        return
+        console.error("[BookingPage] fetch vehicles error:", error);
+        return;
       }
 
       const mapped: Vehicle[] =
@@ -79,55 +113,141 @@ export default function BookingPage() {
           licensePlate: "",
           features: [],
           year: 0,
-        })) || []
+        })) || [];
 
-      setVehicles(mapped)
-    }
+      setVehicles(mapped);
+    };
 
-    load()
-  }, [])
+    load();
+  }, []);
 
-  // Keep your animation on scroll
+  /* ---------------- Animation on scroll (keep your effect) ---------------- */
   useEffect(() => {
     const handleVisibility = () => {
-      const elements = document.querySelectorAll(".fade-in-up")
+      const elements = document.querySelectorAll(".fade-in-up");
       elements.forEach((el) => {
-        const rect = (el as HTMLElement).getBoundingClientRect()
+        const rect = (el as HTMLElement).getBoundingClientRect();
         if (rect.top < window.innerHeight - 100) {
-          el.classList.add("animate")
+          el.classList.add("animate");
         }
-      })
+      });
+    };
+
+    window.addEventListener("scroll", handleVisibility);
+    handleVisibility(); // Check on mount
+    return () => window.removeEventListener("scroll", handleVisibility);
+  }, []);
+
+  const selectedVehicleData = vehicles.find((v) => v.id.toString() === selectedVehicle);
+  const availableVehicles = vehicles.filter((v) => v.available);
+
+  /* ---------------- Fetch availability for selected vehicle ---------------- */
+  useEffect(() => {
+    const fetchAvailability = async () => {
+      setBookedRanges([]);
+      if (!selectedVehicle) return;
+
+      setLoadingAvail(true);
+      try {
+        const todayISO = atStartOfDay(new Date()).toISOString().slice(0, 10);
+        const { data, error } = await supabase
+          .from("bookings")
+          .select("start_date, end_date, status")
+          .eq("vehicle_id", selectedVehicle)
+          .eq("status", "confirmed")
+          .gte("end_date", todayISO)
+          .order("start_date", { ascending: true });
+
+        if (error) {
+          console.error("[BookingPage] fetch bookings error:", error);
+          return;
+        }
+
+        const ranges: BookedRange[] = (data || []).map((r: any) => ({
+          start: atStartOfDay(new Date(r.start_date)),
+          end: atStartOfDay(new Date(r.end_date)),
+        }));
+
+        setBookedRanges(ranges);
+      } finally {
+        setLoadingAvail(false);
+      }
+    };
+
+    fetchAvailability();
+  }, [selectedVehicle]);
+
+  /* ---------------- Derived: next available date note ---------------- */
+  const nextAvailableFrom = useMemo(() => {
+    const today = atStartOfDay(new Date());
+    if (bookedRanges.length === 0) return today;
+
+    const inBlock = bookedRanges.find((r) => dateInRange(today, r));
+    if (inBlock) {
+      const d = new Date(inBlock.end);
+      d.setDate(d.getDate() + 1);
+      return d;
     }
 
-    window.addEventListener("scroll", handleVisibility)
-    handleVisibility() // Check on mount
+    const first = bookedRanges[0];
+    if (isSameOrBefore(today, first.start)) return today;
 
-    return () => {
-      window.removeEventListener("scroll", handleVisibility)
+    let day = new Date(today);
+    while (bookedRanges.some((r) => dateInRange(day, r))) {
+      day.setDate(day.getDate() + 1);
     }
-  }, [])
+    return day;
+  }, [bookedRanges]);
 
-  const selectedVehicleData = vehicles.find((v) => v.id.toString() === selectedVehicle)
-  const availableVehicles = vehicles.filter((v) => v.available)
+  /* ---------------- Calendar disabled + cross-out helpers ---------------- */
+  const todayStart = atStartOfDay(new Date());
 
+  const isDateBooked = (d?: Date) => {
+    if (!d) return false;
+    return bookedRanges.some((r) => dateInRange(d, r));
+  };
+
+  const pickupDisabled = (date: Date) => {
+    return atStartOfDay(date) < todayStart || isDateBooked(date);
+  };
+
+  const returnDisabled = (date: Date) => {
+    const lowerBound = pickupDate ? atStartOfDay(pickupDate) : todayStart;
+    return atStartOfDay(date) < lowerBound || isDateBooked(date);
+  };
+
+  // Build DayPicker "matchers" for the booked ranges so we can style them (cross-out)
+  const unavailableMatchers = useMemo(
+    () => bookedRanges.map((r) => ({ from: r.start, to: r.end })),
+    [bookedRanges]
+  );
+
+  // Class to visually cross booked days (without changing your theme)
+  const unavailableClass =
+    "relative opacity-60 " +
+    "before:content-[''] before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:-translate-y-1/2 before:bg-red-500/70 before:rotate-[-18deg] " +
+    "after:content-[''] after:absolute after:left-1 after:right-1 after:top-1/2 after:h-[2px] after:-translate-y-1/2 after:bg-red-500/70 after:rotate-[18deg]";
+
+  /* ---------------- Price helpers ---------------- */
   const calculateDays = () => {
     if (pickupDate && returnDate) {
-      const diffTime = Math.abs(returnDate.getTime() - pickupDate.getTime())
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-      return diffDays || 1
+      const diffTime = Math.abs(returnDate.getTime() - pickupDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays || 1;
     }
-    return 1
-  }
+    return 1;
+  };
 
   const calculateTotal = () => {
     if (selectedVehicleData) {
-      return selectedVehicleData.pricePerDay * calculateDays()
+      return selectedVehicleData.pricePerDay * calculateDays();
     }
-    return 0
-  }
+    return 0;
+  };
 
+  /* ---------------- Submit & Confirm ---------------- */
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (
       pickupDate &&
       returnDate &&
@@ -138,18 +258,76 @@ export default function BookingPage() {
       customerInfo.phone &&
       customerInfo.email
     ) {
-      setShowSummary(true)
+      const overlaps = bookedRanges.some((r) => rangesOverlap(pickupDate, returnDate, r));
+      if (overlaps) {
+        alert(
+          "The dates you selected overlap an existing booking for this vehicle. Please choose a different period."
+        );
+        return;
+      }
+      setShowSummary(true);
     }
-  }
+  };
 
-  const handleConfirmBooking = () => {
-    setShowSuccess(true)
-    setTimeout(() => {
-      setShowSuccess(false)
-      setShowSummary(false)
-      // Reset form or redirect if you want
-    }, 3000)
-  }
+  const handleConfirmBooking = async () => {
+    if (!supabase) return;
+
+    if (!pickupDate || !returnDate || !selectedVehicleData) {
+      alert("Missing details to confirm.");
+      return;
+    }
+
+    const overlaps = bookedRanges.some((r) => rangesOverlap(pickupDate, returnDate, r));
+    if (overlaps) {
+      alert(
+        "The dates you selected now overlap an existing booking. Please go back and adjust your dates."
+      );
+      return;
+    }
+
+    setConfirming(true);
+    try {
+      const payload: any = {
+        vehicle_id: selectedVehicle, // uuid string
+        start_date: atStartOfDay(pickupDate).toISOString().slice(0, 10),
+        end_date: atStartOfDay(returnDate).toISOString().slice(0, 10),
+        pickup_location: pickupLocation,
+        dropoff_location: dropoffLocation,
+        customer_name: customerInfo.name,
+        contact_number: customerInfo.phone, // your column
+        email: customerInfo.email,          // your column
+        status: "confirmed",
+        total_price: calculateTotal(),
+        // notes removed — your table doesn't have this column
+      };
+
+      const { error } = await supabase.from("bookings").insert(payload);
+
+      if (error) {
+        if (
+          (error as any).code === "23P01" ||
+          String(error?.message || "").toLowerCase().includes("no_overlapping_bookings")
+        ) {
+          alert(
+            "Sorry, those dates just became unavailable for this vehicle. Please choose a different range."
+          );
+          setShowSummary(false);
+          return;
+        }
+        console.error("[BookingPage] insert booking error:", error);
+        alert(error.message || "Failed to confirm booking. Please try again.");
+        return;
+      }
+
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        setShowSummary(false);
+      }, 3000);
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   /* ---------------- SUCCESS SCREEN ---------------- */
   if (showSuccess) {
@@ -176,7 +354,7 @@ export default function BookingPage() {
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   /* ---------------- SUMMARY SCREEN ---------------- */
@@ -334,10 +512,11 @@ export default function BookingPage() {
                     </Button>
                     <Button
                       onClick={handleConfirmBooking}
-                      className="flex-1 btn-3d pulse-glow bg-primary hover:bg-primary/90 text-sm md:text-lg py-3 md:py-6 font-bold"
+                      disabled={confirming}
+                      className="flex-1 btn-3d pulse-glow bg-primary hover:bg-primary/90 text-sm md:text-lg py-3 md:py-6 font-bold disabled:opacity-70"
                     >
                       <CheckCircle className="h-4 w-4 md:h-5 md:w-5 mr-2" />
-                      Confirm Booking
+                      {confirming ? "Confirming..." : "Confirm Booking"}
                     </Button>
                   </div>
                 </CardContent>
@@ -346,7 +525,7 @@ export default function BookingPage() {
           </div>
         </section>
       </div>
-    )
+    );
   }
 
   /* ---------------- MAIN FORM ---------------- */
@@ -452,11 +631,25 @@ export default function BookingPage() {
                                 mode="single"
                                 selected={pickupDate}
                                 onSelect={setPickupDate}
-                                disabled={(date) => date < new Date()}
+                                disabled={pickupDisabled}
+                                modifiers={{ unavailable: unavailableMatchers }}
+                                modifiersClassNames={{ unavailable: unavailableClass }}
                                 initialFocus
                               />
                             </PopoverContent>
                           </Popover>
+                          {selectedVehicle && (
+                            <p className="text-xs md:text-sm text-muted-foreground pt-2">
+                              {loadingAvail
+                                ? "Checking availability…"
+                                : bookedRanges.length > 0
+                                ? `Note: Some dates are unavailable for this vehicle. Next available from ${format(
+                                    nextAvailableFrom,
+                                    "PPP",
+                                  )}.`
+                                : "Great news: this vehicle has no blocked dates ahead."}
+                            </p>
+                          )}
                         </div>
 
                         <div className="space-y-2.5 md:space-y-3">
@@ -485,7 +678,9 @@ export default function BookingPage() {
                                 mode="single"
                                 selected={returnDate}
                                 onSelect={setReturnDate}
-                                disabled={(date) => date < (pickupDate || new Date())}
+                                disabled={returnDisabled}
+                                modifiers={{ unavailable: unavailableMatchers }}
+                                modifiersClassNames={{ unavailable: unavailableClass }}
                                 initialFocus
                               />
                             </PopoverContent>
@@ -738,5 +933,5 @@ export default function BookingPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }
