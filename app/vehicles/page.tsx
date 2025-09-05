@@ -12,10 +12,14 @@ import { Vehicle } from "@/components/vehicles/VehicleTypes";
 import { format } from "date-fns";
 
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
+const availabilityFilters = ["All", "Available", "Unavailable"] as const;
+type AvailabilityFilter = (typeof availabilityFilters)[number];
 
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [selectedAvailability, setSelectedAvailability] =
+    useState<AvailabilityFilter>("All");
   const [showFilters, setShowFilters] = useState(false);
 
   /* ---------------- Load vehicles + override availability for today's bookings ---------------- */
@@ -119,10 +123,17 @@ export default function VehiclesPage() {
   }, []);
 
   /* ---------------- Filtering ---------------- */
-  const filteredVehicles = vehicles.filter(
-    (vehicle) =>
-      selectedCategory === "All" || vehicle.category === selectedCategory
-  );
+  const filteredVehicles = vehicles
+    .filter(
+      (v) => selectedCategory === "All" || v.category === selectedCategory
+    )
+    .filter((v) =>
+      selectedAvailability === "All"
+        ? true
+        : selectedAvailability === "Available"
+        ? v.available
+        : !v.available
+    );
 
   return (
     <div className="min-h-screen bg-background">
@@ -164,60 +175,84 @@ export default function VehiclesPage() {
       </nav>
 
       {/* Hero Section */}
-      <section className="relative py-20 px-4 overflow-hidden">
+      <section className="relative py-16 sm:py-20 px-4 overflow-hidden">
         <div className="absolute inset-0 gradient-primary opacity-90" />
         <div className="absolute inset-0 bg-black/20" />
 
         <div className="relative z-10 container mx-auto max-w-6xl">
-          <div className="fade-in-up text-center mb-12">
-            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 drop-shadow-2xl">
+          <div className="fade-in-up text-center mb-8 sm:mb-12">
+            <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold text-white mb-4 sm:mb-6 drop-shadow-2xl">
               Our Premium Fleet
             </h1>
-            <p className="text-xl md:text-2xl text-white/90 mb-8 max-w-3xl mx-auto drop-shadow-lg">
+            <p className="text-base sm:text-xl md:text-2xl text-white/90 mb-6 sm:mb-8 max-w-3xl mx-auto drop-shadow-lg">
               Choose from our diverse range of well-maintained vehicles perfect
               for exploring Fiji in style
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowFilters(!showFilters)}
-                className="md:hidden btn-3d glass-effect text-white border-white/30 hover:bg-white/10"
-              >
-                <Filter className="h-4 w-4 mr-2" />
-                Filters
-              </Button>
-              <div
-                className={`flex flex-wrap gap-3 ${
-                  showFilters ? "block" : "hidden md:flex"
-                }`}
-              >
-                {categories.map((category) => (
-                  <Button
-                    key={category}
-                    variant={
-                      selectedCategory === category ? "default" : "outline"
-                    }
-                    size="sm"
-                    onClick={() => setSelectedCategory(category)}
-                    className={
-                      selectedCategory === category
-                        ? "btn-3d bg-white text-primary hover:bg-white/90 font-bold"
-                        : "btn-3d glass-effect text-white border-white/30 hover:bg-white/10"
-                    }
-                  >
-                    {category}
-                  </Button>
-                ))}
+          <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 items-start sm:items-center justify-between">
+            <div className="flex flex-col gap-3 w-full">
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="md:hidden btn-3d glass-effect text-white border-white/30 hover:bg-white/10"
+                >
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filters
+                </Button>
+              </div>
+
+              {/* Mobile/desktop: Categories row */}
+              <div className={`w-full ${showFilters ? "block" : "hidden md:block"}`}>
+                <div className="flex gap-3 overflow-x-auto whitespace-nowrap py-1 -mx-1 px-1">
+                  {categories.map((category) => (
+                    <Button
+                      key={category}
+                      variant={
+                        selectedCategory === category ? "default" : "outline"
+                      }
+                      size="sm"
+                      onClick={() => setSelectedCategory(category)}
+                      className={
+                        selectedCategory === category
+                          ? "btn-3d bg-white text-primary hover:bg-white/90 font-bold whitespace-nowrap"
+                          : "btn-3d glass-effect text-white border-white/30 hover:bg-white/10 whitespace-nowrap"
+                      }
+                    >
+                      {category}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mobile/desktop: Availability row */}
+              <div className={`w-full ${showFilters ? "block" : "hidden md:block"}`}>
+                <div className="flex gap-3 overflow-x-auto whitespace-nowrap py-1 -mx-1 px-1">
+                  {availabilityFilters.map((a) => (
+                    <Button
+                      key={a}
+                      variant={selectedAvailability === a ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setSelectedAvailability(a)}
+                      className={
+                        selectedAvailability === a
+                          ? "btn-3d bg-white text-primary hover:bg-white/90 font-bold whitespace-nowrap"
+                          : "btn-3d glass-effect text-white border-white/30 hover:bg-white/10 whitespace-nowrap"
+                      }
+                    >
+                      {a}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
-            <div className="glass-effect px-4 py-2 rounded-lg">
+
+            <div className="hidden sm:block glass-effect px-4 py-2 rounded-lg">
               <p className="text-white/90 font-medium">
                 {filteredVehicles.length} vehicle
-                {filteredVehicles.length !== 1 ? "s" : ""} available
+                {filteredVehicles.length !== 1 ? "s" : ""} found
               </p>
             </div>
           </div>
@@ -225,9 +260,9 @@ export default function VehiclesPage() {
       </section>
 
       {/* Vehicle Cards */}
-      <section className="py-20 px-4 bg-gradient-to-b from-background to-muted/10">
+      <section className="py-12 sm:py-20 px-4 bg-gradient-to-b from-background to-muted/10">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             {filteredVehicles.map((vehicle: Vehicle, index: number) => (
               <div
                 key={vehicle.id}
@@ -241,18 +276,17 @@ export default function VehiclesPage() {
                       alt={vehicle.name}
                       width={300}
                       height={200}
-                      className="w-full h-52 object-cover group-hover:scale-110 transition-transform duration-500"
+                      className="w-full h-40 sm:h-52 object-cover group-hover:scale-110 transition-transform duration-500"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                    <div className="absolute top-4 left-4">
+                    <div className="absolute top-3 sm:top-4 left-3 sm:left-4">
                       <Badge className="glass-effect-dark text-white border-white/20 font-medium">
                         {vehicle.category || "—"}
                       </Badge>
                     </div>
 
-                    {/* >>> Unavailable now RED & more prominent <<< */}
-                    <div className="absolute top-4 right-4">
+                    <div className="absolute top-3 sm:top-4 right-3 sm:right-4">
                       {vehicle.available ? (
                         <Badge className="bg-green-600 hover:bg-green-600 text-white font-bold pulse-glow">
                           Available Now
@@ -265,26 +299,26 @@ export default function VehiclesPage() {
                     </div>
                   </div>
 
-                  <CardHeader className="pb-4">
+                  <CardHeader className="pb-3 sm:pb-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-300">
+                      <h3 className="text-lg sm:text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-300">
                         {vehicle.name}
                       </h3>
                       <div className="text-right">
-                        <p className="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                        <p className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
                           ${vehicle.pricePerDay}
                         </p>
-                        <p className="text-sm text-muted-foreground font-medium">
+                        <p className="text-xs sm:text-sm text-muted-foreground font-medium">
                           per day
                         </p>
                       </div>
                     </div>
                   </CardHeader>
 
-                  <CardContent className="pt-0 space-y-6">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                  <CardContent className="pt-0 space-y-4 sm:space-y-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
                       <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                        <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary/10 rounded-full flex items-center justify-center">
                           <Users className="h-4 w-4 text-primary" />
                         </div>
                         <span className="font-medium">
@@ -292,13 +326,13 @@ export default function VehiclesPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                        <div className="w-8 h-8 bg-secondary/10 rounded-full flex items-center justify-center">
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 bg-secondary/10 rounded-full flex items-center justify-center">
                           <Fuel className="h-4 w-4 text-secondary" />
                         </div>
                         <span className="font-medium">{vehicle.fuel}</span>
                       </div>
                       <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                        <div className="w-8 h-8 bg-accent/10 rounded-full flex items-center justify-center">
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 bg-accent/10 rounded-full flex items-center justify-center">
                           <Car className="h-4 w-4 text-accent" />
                         </div>
                         <span className="font-medium">{vehicle.transmission}</span>
@@ -306,7 +340,7 @@ export default function VehiclesPage() {
                     </div>
 
                     <div>
-                      <p className="text-sm font-bold text-foreground mb-3">
+                      <p className="text-xs sm:text-sm font-bold text-foreground mb-2 sm:mb-3">
                         Premium Features:
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -315,7 +349,7 @@ export default function VehiclesPage() {
                             <Badge
                               key={index}
                               variant="outline"
-                              className="text-xs font-medium border-primary/20 hover:bg-primary/10 transition-colors"
+                              className="text-[10px] sm:text-xs font-medium border-primary/20 hover:bg-primary/10 transition-colors"
                             >
                               {feature}
                             </Badge>
@@ -324,7 +358,7 @@ export default function VehiclesPage() {
                         {vehicle.features.length > 3 && (
                           <Badge
                             variant="outline"
-                            className="text-xs font-medium border-secondary/20 hover:bg-secondary/10 transition-colors"
+                            className="text-[10px] sm:text-xs font-medium border-secondary/20 hover:bg-secondary/10 transition-colors"
                           >
                             +{vehicle.features.length - 3} more
                           </Badge>
@@ -332,19 +366,19 @@ export default function VehiclesPage() {
                       </div>
                     </div>
 
-                    <div className="flex gap-3 pt-2">
+                    <div className="flex gap-3 pt-1 sm:pt-2">
                       <Button
                         asChild
-                        className="flex-1 btn-3d bg-primary hover:bg-primary/90 font-bold text-lg py-6"
+                        className="flex-1 btn-3d bg-primary hover:bg-primary/90 font-bold text-base sm:text-lg py-4 sm:py-6"
                         disabled={!vehicle.available}
                       >
                         <Link href={`/booking?vehicle=${vehicle.id}`}>
-                          {vehicle.available ? "Book Now" : "Unavailable"}
+                          {vehicle.available ? "Book Now" : "Reserve"}
                         </Link>
                       </Button>
                       <Button
                         variant="outline"
-                        className="btn-3d px-6 py-6 border-primary/20 hover:bg-primary/10 bg-transparent"
+                        className="btn-3d px-4 sm:px-6 py-4 sm:py-6 border-primary/20 hover:bg-primary/10 bg-transparent"
                       >
                         <Eye className="h-5 w-5" />
                       </Button>
@@ -367,7 +401,10 @@ export default function VehiclesPage() {
                 Try adjusting your filters to see more options
               </p>
               <Button
-                onClick={() => setSelectedCategory("All")}
+                onClick={() => {
+                  setSelectedCategory("All");
+                  setSelectedAvailability("All");
+                }}
                 className="btn-3d bg-primary hover:bg-primary/90 px-8 py-6 text-lg"
               >
                 Clear Filters

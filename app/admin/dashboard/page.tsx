@@ -5,23 +5,30 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AdminAuthGuard } from "@/components/admin-auth-guard"
-import { Car, Users, Calendar, Settings, LogOut, BarChart3, TrendingUp, Shield } from "lucide-react"
+import { Car, Calendar, Settings, LogOut, BarChart3, TrendingUp, Shield } from "lucide-react"
 import Link from "next/link"
+import { supabase } from "@/lib/supabaseClient"
 
 function DashboardContent() {
   const [adminUser, setAdminUser] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [metrics, setMetrics] = useState({ vehicles: 0, bookings: 0, revenue: 0 })
   const router = useRouter()
+
+  const fmtFJD = new Intl.NumberFormat("en-FJ", {
+    style: "currency",
+    currency: "FJD",
+    maximumFractionDigits: 2,
+  })
 
   useEffect(() => {
     const user = localStorage.getItem("adminUser")
-    if (user) {
-      setAdminUser(user)
-    }
+    if (user) setAdminUser(user)
 
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up")
       elements.forEach((el) => {
-        const rect = el.getBoundingClientRect()
+        const rect = (el as HTMLElement).getBoundingClientRect()
         if (rect.top < window.innerHeight - 100) {
           el.classList.add("animate")
         }
@@ -29,11 +36,8 @@ function DashboardContent() {
     }
 
     window.addEventListener("scroll", handleVisibility)
-    handleVisibility() // Check on mount
-
-    return () => {
-      window.removeEventListener("scroll", handleVisibility)
-    }
+    handleVisibility()
+    return () => window.removeEventListener("scroll", handleVisibility)
   }, [])
 
   const handleLogout = () => {
@@ -42,17 +46,71 @@ function DashboardContent() {
     router.push("/admin/login")
   }
 
-  // Mock dashboard stats
-  const stats = [
-    { title: "Total Vehicles", value: "8", icon: Car, color: "gradient-primary", trend: "+2 this month" },
-    { title: "Active Bookings", value: "12", icon: Calendar, color: "gradient-secondary", trend: "+5 this week" },
-    { title: "Total Customers", value: "45", icon: Users, color: "gradient-accent", trend: "+8 this month" },
+  // Load live metrics
+  useEffect(() => {
+    const load = async () => {
+      try {
+        // Vehicles count
+        const { count: vehicleCount, error: vErr } = await supabase
+          .from("vehicles")
+          .select("*", { count: "exact", head: true })
+        if (vErr) throw vErr
+
+        // Confirmed bookings count
+        const { count: bookingCount, error: bErr } = await supabase
+          .from("bookings")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "confirmed")
+        if (bErr) throw bErr
+
+        // Revenue (sum total_price for confirmed bookings)
+        const { data: revRows, error: rErr } = await supabase
+          .from("bookings")
+          .select("total_price")
+          .eq("status", "confirmed")
+        if (rErr) throw rErr
+
+        const revenue = (revRows || []).reduce((sum, r: any) => {
+          const v = Number(r?.total_price ?? 0)
+          return sum + (Number.isFinite(v) ? v : 0)
+        }, 0)
+
+        setMetrics({
+          vehicles: vehicleCount || 0,
+          bookings: bookingCount || 0,
+          revenue,
+        })
+      } catch (err) {
+        console.error("[AdminDashboard] metrics error:", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  // Three cards: Vehicles, Bookings, Revenue (removed Customers)
+  const statCards = [
     {
-      title: "Revenue (Month)",
-      value: "$3,240",
+      title: "Total Vehicles",
+      value: loading ? "—" : String(metrics.vehicles),
+      icon: Car,
+      color: "gradient-primary",
+      hint: "From vehicles table",
+    },
+    {
+      title: "Active Bookings",
+      value: loading ? "—" : String(metrics.bookings),
+      icon: Calendar,
+      color: "gradient-secondary",
+      hint: "Confirmed only",
+    },
+    {
+      title: "Revenue (All Time)",
+      value: loading ? "—" : fmtFJD.format(metrics.revenue),
       icon: BarChart3,
       color: "gradient-primary",
-      trend: "+12% vs last month",
+      hint: "From confirmed bookings",
     },
   ]
 
@@ -99,9 +157,9 @@ function DashboardContent() {
             <p className="text-white/80 text-xl">Manage your premium vehicle rental business</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-            {stats.map((stat, index) => (
-              <div key={index} className="fade-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+            {statCards.map((stat, index) => (
+              <div key={stat.title} className="fade-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
                 <Card className="card-3d tilt-3d border-0 glass-effect-dark group">
                   <CardContent className="p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -115,7 +173,7 @@ function DashboardContent() {
                     <div>
                       <p className="text-white/70 text-sm font-medium mb-1">{stat.title}</p>
                       <p className="text-3xl font-bold text-white mb-2">{stat.value}</p>
-                      <p className="text-green-400 text-xs font-medium">{stat.trend}</p>
+                      <p className="text-white/60 text-xs">{stat.hint}</p>
                     </div>
                   </CardContent>
                 </Card>
