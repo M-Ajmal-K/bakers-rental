@@ -19,6 +19,7 @@ import { Car, Plus, LogOut, AlertTriangle } from "lucide-react";
 import VehicleForm from "./VehicleForm";
 import VehicleList from "./VehicleList";
 import { FormState, Vehicle } from "./VehicleTypes";
+import { format } from "date-fns"; // ⬅️ added
 
 export default function VehicleManagement() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -44,12 +45,13 @@ export default function VehicleManagement() {
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const router = useRouter();
 
-  /* ---------------- Load vehicles ---------------- */
+  /* ---------------- Load vehicles + compute dynamic availability ---------------- */
   useEffect(() => {
     const load = async () => {
       if (!supabase) return;
 
-      const { data, error } = await supabase
+      // 1) Load the vehicles as before
+      const { data: vData, error: vErr } = await supabase
         .from("vehicles")
         .select(
           `id, registration_number, title, brand, model, year, rental_price, 
@@ -57,13 +59,38 @@ export default function VehicleManagement() {
         )
         .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("[Vehicles] select error:", error);
+      if (vErr) {
+        console.error("[Vehicles] select error:", vErr);
         return;
       }
+      const vehiclesRaw = vData || [];
 
+      // 2) Build an ID list and fetch ACTIVE bookings for TODAY
+      const ids = vehiclesRaw.map((v: any) => v.id).filter(Boolean);
+      let unavailSet = new Set<string>();
+
+      if (ids.length > 0) {
+        const todayLocal = format(new Date(), "yyyy-MM-dd");
+        const { data: bData, error: bErr } = await supabase
+          .from("bookings")
+          .select("vehicle_id, start_date, end_date, status")
+          .in("vehicle_id", ids)
+          .eq("status", "confirmed")
+          .lte("start_date", todayLocal)
+          .gte("end_date", todayLocal);
+
+        if (bErr) {
+          console.error("[Vehicles] bookings fetch error:", bErr);
+        } else {
+          for (const b of bData || []) {
+            if (b?.vehicle_id) unavailSet.add(String(b.vehicle_id));
+          }
+        }
+      }
+
+      // 3) Map to your Vehicle type and override availability if booked today
       const mapped: Vehicle[] =
-        (data || []).map((v: any) => ({
+        vehiclesRaw.map((v: any) => ({
           id: v.id,
           name: v.title,
           brand: v.brand ?? "",
@@ -71,8 +98,9 @@ export default function VehicleManagement() {
           year: Number(v.year ?? 0),
           pricePerDay: Number(v.rental_price ?? 0),
           licensePlate: v.registration_number ?? "",
-          available: Boolean(v.available),
-          image: v.public_url ?? null, // ✅ direct from DB
+          // If booked today => force Unavailable; else keep DB flag
+          available: Boolean(v.available) && !unavailSet.has(String(v.id)),
+          image: v.public_url ?? null,
           imagePath: v.image_path ?? null,
           category: v.category ?? "",
           passengers: Number(v.passengers ?? 0),
@@ -87,6 +115,7 @@ export default function VehicleManagement() {
 
       setVehicles(mapped);
     };
+
     load();
   }, []);
 
@@ -157,7 +186,7 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
         image_path,
-        public_url: publicUrl, // ✅ Save public_url too
+        public_url: publicUrl,
         available: formData.available,
         category: formData.category,
         passengers: Number(formData.passengers || 0),
@@ -167,8 +196,6 @@ export default function VehicleManagement() {
           ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
           : [],
       };
-
-      console.log("Insert payload:", payload);
 
       const { data, error } = await supabase
         .from("vehicles")
@@ -190,8 +217,8 @@ export default function VehicleManagement() {
         year: Number(data.year ?? 0),
         pricePerDay: Number(data.rental_price ?? 0),
         licensePlate: data.registration_number ?? "",
-        available: Boolean(data.available),
-        image: data.public_url ?? publicUrl ?? null, // ✅ prefer DB value
+        available: Boolean(data.available), // will be adjusted on next load
+        image: data.public_url ?? publicUrl ?? null,
         imagePath: data.image_path ?? null,
         category: data.category ?? "",
         passengers: Number(data.passengers ?? 0),
@@ -287,7 +314,7 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         pricePerDay: Number(formData.pricePerDay || "0"),
         licensePlate: formData.licensePlate,
-        available: formData.available,
+        available: formData.available, // will still be overridden by today's status on next load
         image: newPublicUrl,
         imagePath: newImagePath ?? editingVehicle.imagePath,
         category: formData.category,

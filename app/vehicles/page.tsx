@@ -9,6 +9,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { supabase, STORAGE_BUCKET } from "@/lib/supabaseClient";
 import { Vehicle } from "@/components/vehicles/VehicleTypes";
+import { format } from "date-fns";
 
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
 
@@ -17,7 +18,7 @@ export default function VehiclesPage() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [showFilters, setShowFilters] = useState(false);
 
-  /* ---------------- Load real vehicles from Supabase ---------------- */
+  /* ---------------- Load vehicles + override availability for today's bookings ---------------- */
   useEffect(() => {
     const load = async () => {
       const { data, error } = await supabase
@@ -33,9 +34,9 @@ export default function VehiclesPage() {
         return;
       }
 
-      const mapped: Vehicle[] =
+      // Resolve images
+      const baseMapped =
         (data || []).map((v: any) => {
-          // ✅ Always resolve image, fallback if public_url is missing
           let img: string | null = v.public_url ?? null;
           if (!img && v.image_path) {
             const { data: pub } = supabase.storage
@@ -52,16 +53,44 @@ export default function VehiclesPage() {
             year: Number(v.year ?? 0),
             pricePerDay: Number(v.rental_price ?? 0),
             licensePlate: v.registration_number ?? "",
-            available: Boolean(v.available),
-            image: img, // ✅ fixed: now always has a usable URL
+            available: Boolean(v.available), // will override below if booked
+            image: img,
             imagePath: v.image_path ?? null,
             category: v.category ?? "",
             passengers: Number(v.passengers ?? 0),
             transmission: v.transmission ?? "",
             fuel: v.fuel ?? "",
             features: Array.isArray(v.features) ? v.features : [],
-          };
+          } as Vehicle;
         }) || [];
+
+      // Find vehicles booked for TODAY (local)
+      const ids = baseMapped.map((v) => v.id).filter(Boolean);
+      let bookedToday = new Set<string>();
+      if (ids.length > 0) {
+        const todayLocal = format(new Date(), "yyyy-MM-dd");
+        const { data: bData, error: bErr } = await supabase
+          .from("bookings")
+          .select("vehicle_id, start_date, end_date, status")
+          .in("vehicle_id", ids as any[])
+          .eq("status", "confirmed")
+          .lte("start_date", todayLocal)
+          .gte("end_date", todayLocal);
+
+        if (bErr) {
+          console.error("[VehiclesPage] bookings fetch error:", bErr);
+        } else {
+          for (const b of bData || []) {
+            if (b?.vehicle_id) bookedToday.add(String(b.vehicle_id));
+          }
+        }
+      }
+
+      // Override availability if booked today
+      const mapped = baseMapped.map((v) => ({
+        ...v,
+        available: v.available && !bookedToday.has(String(v.id)),
+      }));
 
       setVehicles(mapped);
     };
@@ -74,7 +103,7 @@ export default function VehiclesPage() {
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up");
       elements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
+        const rect = (el as HTMLElement).getBoundingClientRect();
         if (rect.top < window.innerHeight - 100) {
           el.classList.add("animate");
         }
@@ -221,13 +250,15 @@ export default function VehiclesPage() {
                         {vehicle.category || "—"}
                       </Badge>
                     </div>
+
+                    {/* >>> Unavailable now RED & more prominent <<< */}
                     <div className="absolute top-4 right-4">
                       {vehicle.available ? (
-                        <Badge className="bg-green-500 hover:bg-green-500 text-white font-bold pulse-glow">
+                        <Badge className="bg-green-600 hover:bg-green-600 text-white font-bold pulse-glow">
                           Available Now
                         </Badge>
                       ) : (
-                        <Badge className="bg-secondary hover:bg-secondary text-white font-medium">
+                        <Badge className="bg-red-600 hover:bg-red-600 text-white font-bold ring-2 ring-red-300/40 shadow-md">
                           Unavailable
                         </Badge>
                       )}
@@ -308,7 +339,7 @@ export default function VehiclesPage() {
                         disabled={!vehicle.available}
                       >
                         <Link href={`/booking?vehicle=${vehicle.id}`}>
-                          {vehicle.available ? "Book Now" : "Reserve"}
+                          {vehicle.available ? "Book Now" : "Unavailable"}
                         </Link>
                       </Button>
                       <Button

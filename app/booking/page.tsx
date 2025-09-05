@@ -149,13 +149,15 @@ export default function BookingPage() {
 
       setLoadingAvail(true);
       try {
-        const todayISO = atStartOfDay(new Date()).toISOString().slice(0, 10);
+        // 🔁 Use LOCAL date string (not UTC ISO slice)
+        const todayLocal = format(atStartOfDay(new Date()), "yyyy-MM-dd");
+
         const { data, error } = await supabase
           .from("bookings")
           .select("start_date, end_date, status")
           .eq("vehicle_id", selectedVehicle)
           .eq("status", "confirmed")
-          .gte("end_date", todayISO)
+          .gte("end_date", todayLocal)
           .order("start_date", { ascending: true });
 
         if (error) {
@@ -289,13 +291,14 @@ export default function BookingPage() {
     try {
       const payload: any = {
         vehicle_id: selectedVehicle, // uuid string
-        start_date: atStartOfDay(pickupDate).toISOString().slice(0, 10),
-        end_date: atStartOfDay(returnDate).toISOString().slice(0, 10),
+        // 🔁 Use LOCAL date strings for DATE columns (avoid UTC day shift)
+        start_date: format(atStartOfDay(pickupDate), "yyyy-MM-dd"),
+        end_date: format(atStartOfDay(returnDate), "yyyy-MM-dd"),
         pickup_location: pickupLocation,
         dropoff_location: dropoffLocation,
         customer_name: customerInfo.name,
-        contact_number: customerInfo.phone, // your column
-        email: customerInfo.email,          // your column
+        contact_number: customerInfo.phone, // your column name
+        email: customerInfo.email,          // your column name
         status: "confirmed",
         total_price: calculateTotal(),
         // notes removed — your table doesn't have this column
