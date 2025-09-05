@@ -22,12 +22,14 @@ import { supabase } from "@/lib/supabaseClient"
 /* -------------------------------------------------------------------------- */
 
 const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const
+
+// Themed for dark UI (visual-only change)
 const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  confirmed: "bg-green-100 text-green-800",
-  completed: "bg-blue-100 text-blue-800",
-  cancelled: "bg-red-100 text-red-800",
-  active: "bg-indigo-100 text-indigo-800",
+  pending: "bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30",
+  confirmed: "bg-green-500/15 text-green-200 ring-1 ring-green-400/30",
+  completed: "bg-blue-500/15 text-blue-200 ring-1 ring-blue-400/30",
+  cancelled: "bg-red-500/15 text-red-200 ring-1 ring-red-400/30",
+  active: "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-400/30",
 }
 
 type BookingStatus = typeof bookingStatuses[number]
@@ -68,7 +70,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
   calculateDays: (a: string, b: string) => number
 }) {
   return (
-    <Card className="border-0 glass-effect-dark">
+    <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10">
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -117,7 +119,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
             variant="outline"
             size="sm"
             onClick={() => onView(booking)}
-            className="h-8 px-3 glass-effect-dark text-white border-white/20 hover:bg-white/10"
+            className="h-8 px-3 bg-white/5 hover:bg-white/10 border-white/10 text-white"
           >
             <Eye className="h-3.5 w-3.5 mr-1" /> View
           </Button>
@@ -125,7 +127,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
             variant="outline"
             size="sm"
             onClick={() => onEdit(booking)}
-            className="h-8 px-3 glass-effect-dark text-white border-white/20 hover:bg-white/10"
+            className="h-8 px-3 bg-white/5 hover:bg-white/10 border-white/10 text-white"
           >
             <Edit className="h-3.5 w-3.5 mr-1" /> Edit
           </Button>
@@ -133,7 +135,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
             variant="outline"
             size="sm"
             onClick={() => onDelete(booking.id)}
-            className="h-8 px-3 glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
+            className="h-8 px-3 bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
           >
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
           </Button>
@@ -298,7 +300,7 @@ function BookingManagementContent() {
   }
 
   const getStatusBadge = (status: string) => {
-    const colorClass = statusColors[status] || "bg-gray-100 text-gray-800"
+    const colorClass = statusColors[status] || "bg-white/10 text-white ring-1 ring-white/15"
     return (
       <Badge className={`${colorClass} capitalize`} variant="secondary">
         {status}
@@ -315,24 +317,33 @@ function BookingManagementContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
-      <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
+    <div className="relative min-h-screen overflow-hidden">
+      {/* Aurora background accents */}
+      <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-500/10 blur-3xl" />
+      <div className="absolute inset-0 -z-20 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950" />
+
+      {/* Top nav (themed) */}
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-r from-slate-950/70 via-slate-900/40 to-slate-950/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <Link href="/admin/dashboard" className="flex items-center space-x-3 group">
-              <div className="w-10 h-10 md:w-12 md:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+              <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-black/20 group-hover:scale-110 transition-transform duration-300">
                 <Car className="h-5 w-5 md:h-6 md:w-6 text-white" />
               </div>
               <div>
-                <span className="text-xl md:text-2xl font-bold text-white leading-none">Bakers Rentals</span>
-                <p className="text-xs md:text-sm text-white/80">Booking Management</p>
+                <span className="text-xl md:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-cyan-100 to-fuchsia-100 bg-clip-text text-transparent leading-none">
+                  Bakers Rentals
+                </span>
+                <p className="text-xs md:text-sm text-cyan-100/80">Booking Management</p>
               </div>
             </Link>
             <Button
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="h-9 md:h-10 px-3 md:px-4 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent"
+              className="h-9 md:h-10 px-3 md:px-4 bg-white/5 hover:bg-white/10 border-white/10 text-white"
             >
               <LogOut className="h-4 w-4 mr-1.5" />
               <span className="hidden sm:inline">Logout</span>
@@ -344,8 +355,10 @@ function BookingManagementContent() {
       <section className="py-8 md:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
           <div className="fade-in-up mb-8 md:mb-12">
-            <h1 className="text-3xl md:text-5xl font-bold text-white mb-2 md:mb-4 drop-shadow-lg">Booking Management</h1>
-            <p className="text-white/80 text-base md:text-xl">
+            <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-2 md:mb-4 drop-shadow">
+              Booking Management
+            </h1>
+            <p className="text-cyan-100/80 text-base md:text-xl">
               {loading ? "Loading bookings…" : "View and manage customer reservations"}
             </p>
           </div>
@@ -353,7 +366,7 @@ function BookingManagementContent() {
           {/* Optional inline error */}
           {loadError && (
             <div className="fade-in-up mb-6">
-              <Card className="card-3d border-0 glass-effect-dark">
+              <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
                 <CardContent className="p-4 text-sm text-red-200">{loadError}</CardContent>
               </Card>
             </div>
@@ -361,7 +374,7 @@ function BookingManagementContent() {
 
           {/* Filters */}
           <div className="fade-in-up mb-6 md:mb-8" style={{ animationDelay: "0.2s" }}>
-            <Card className="card-3d border-0 glass-effect-dark">
+            <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
               <CardHeader className="pb-3 md:pb-4">
                 <CardTitle className="flex items-center gap-2 md:gap-3 text-white text-lg md:text-xl">
                   <Filter className="h-5 w-5 md:h-6 md:w-6 text-white" />
@@ -379,7 +392,7 @@ function BookingManagementContent() {
                       placeholder="Search by customer, ref, vehicle, or plate..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="mt-2 h-10 md:h-11 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
+                      className="mt-2 h-10 md:h-11 bg-white/5 border-white/10 text-white placeholder:text-white/50"
                     />
                   </div>
                   <div className="w-full md:w-48">
@@ -387,12 +400,12 @@ function BookingManagementContent() {
                       Status Filter
                     </Label>
                     <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as BookingStatus | "all")}>
-                      <SelectTrigger className="mt-2 h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20">
+                      <SelectTrigger className="mt-2 h-10 md:h-11 bg-white/5 border-white/10 text-white">
                         <SelectValue placeholder="All Statuses" />
                       </SelectTrigger>
-                      <SelectContent className="glass-effect-dark border-white/20">
+                      <SelectContent className="bg-slate-900/90 backdrop-blur-xl border-white/10 text-white">
                         {bookingStatuses.map((status) => (
-                          <SelectItem key={status} value={status} className="text-white hover:bg-white/10">
+                          <SelectItem key={status} value={status} className="hover:bg-white/10">
                             {status === "all" ? "All Statuses" : status.charAt(0).toUpperCase() + status.slice(1)}
                           </SelectItem>
                         ))}
@@ -428,7 +441,7 @@ function BookingManagementContent() {
 
           {/* Desktop/Tablet: Table */}
           <div className="fade-in-up hidden md:block" style={{ animationDelay: "0.4s" }}>
-            <Card className="card-3d border-0 glass-effect-dark">
+            <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
               <CardHeader>
                 <CardTitle className="text-white text-2xl">
                   {loading ? "Loading…" : `All Bookings (${filteredBookings.length})`}
@@ -492,7 +505,7 @@ function BookingManagementContent() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleViewBooking(booking)}
-                                className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
+                                className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
@@ -500,7 +513,7 @@ function BookingManagementContent() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleEditBooking(booking)}
-                                className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
+                                className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -508,7 +521,7 @@ function BookingManagementContent() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleDeleteBooking(booking.id)}
-                                className="btn-3d glass-effect-dark text-red-400 border-red-500/30 hover:bg-red-500/10"
+                                className="bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -537,12 +550,8 @@ function BookingManagementContent() {
               forceMount
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20 text-white"
+              className="max-w-xl md:max-w-2xl bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 text-white"
             >
-              {/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */}
-              {/*                        added `text-white`                    */}
-              {/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */}
-              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-xl md:text-2xl">Booking Details</DialogTitle>
               </DialogHeader>
@@ -644,9 +653,8 @@ function BookingManagementContent() {
               forceMount
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-xl md:max-w-2xl glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+              className="max-w-xl md:max-w-2xl bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 text-white"
             >
-              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-xl md:text-2xl">Edit Booking</DialogTitle>
               </DialogHeader>
@@ -660,22 +668,14 @@ function BookingManagementContent() {
                       value={editFormData.status}
                       onValueChange={(value) => setEditFormData({ ...editFormData, status: value })}
                     >
-                      <SelectTrigger className="h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10">
+                      <SelectTrigger className="h-10 md:h-11 bg-white/5 border-white/10 text-white hover:bg-white/10">
                         <SelectValue placeholder="Choose status" />
                       </SelectTrigger>
-                      <SelectContent className="glass-effect-dark border-white/20">
-                        <SelectItem value="pending" className="text-white hover:bg-white/10">
-                          Pending
-                        </SelectItem>
-                        <SelectItem value="confirmed" className="text-white hover:bg-white/10">
-                          Confirmed
-                        </SelectItem>
-                        <SelectItem value="completed" className="text-white hover:bg-white/10">
-                          Completed
-                        </SelectItem>
-                        <SelectItem value="cancelled" className="text-white hover:bg-white/10">
-                          Cancelled
-                        </SelectItem>
+                      <SelectContent className="bg-slate-900/90 backdrop-blur-xl border-white/10 text-white">
+                        <SelectItem value="pending" className="hover:bg-white/10">Pending</SelectItem>
+                        <SelectItem value="confirmed" className="hover:bg-white/10">Confirmed</SelectItem>
+                        <SelectItem value="completed" className="hover:bg-white/10">Completed</SelectItem>
+                        <SelectItem value="cancelled" className="hover:bg-white/10">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -689,12 +689,15 @@ function BookingManagementContent() {
                       placeholder="Add notes about this booking..."
                       value={editFormData.notes}
                       onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                      className="h-10 md:h-11 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
+                      className="h-10 md:h-11 bg-white/5 border-white/10 text-white placeholder:text-white/50"
                     />
                   </div>
 
                   <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="h-10 md:h-11 px-4 bg-primary hover:bg-primary/90 text-white">
+                    <Button
+                      type="submit"
+                      className="h-10 md:h-11 px-4 bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:from-cyan-400 hover:to-fuchsia-400 text-white font-bold shadow-lg shadow-cyan-500/20"
+                    >
                       Update Booking
                     </Button>
                     <Button
@@ -704,7 +707,7 @@ function BookingManagementContent() {
                         setIsEditDialogOpen(false)
                         setSelectedBooking(null)
                       }}
-                      className="h-10 md:h-11 btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10"
+                      className="h-10 md:h-11 bg-white/5 hover:bg-white/10 border-white/10 text-white"
                     >
                       Cancel
                     </Button>

@@ -89,58 +89,72 @@ function DashboardContent() {
     load()
   }, [])
 
-  // Three cards: Vehicles, Bookings, Revenue (removed Customers)
+  // Aurora Neon palette for icon tiles
+  const iconGradients = [
+    "bg-gradient-to-br from-cyan-500 to-sky-500",
+    "bg-gradient-to-br from-violet-500 to-fuchsia-500",
+    "bg-gradient-to-br from-emerald-500 to-teal-500",
+  ]
+
   const statCards = [
     {
       title: "Total Vehicles",
       value: loading ? "—" : String(metrics.vehicles),
       icon: Car,
-      color: "gradient-primary",
       hint: "From vehicles table",
     },
     {
       title: "Active Bookings",
       value: loading ? "—" : String(metrics.bookings),
       icon: Calendar,
-      color: "gradient-secondary",
       hint: "Confirmed only",
     },
     {
       title: "Revenue (All Time)",
       value: loading ? "—" : fmtFJD.format(metrics.revenue),
       icon: BarChart3,
-      color: "gradient-primary",
       hint: "From confirmed bookings",
     },
   ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
-      <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
+    <div className="relative min-h-screen overflow-hidden">
+      {/* Aurora background accents (non-intrusive, performant) */}
+      <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-500/10 blur-3xl" />
+
+      {/* Page gradient base */}
+      <div className="absolute inset-0 -z-20 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950" />
+
+      {/* Nav */}
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-r from-slate-950/70 via-slate-900/40 to-slate-950/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center">
-                <Car className="h-6 w-6 text-white" />
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 shadow-lg shadow-cyan-500/10 flex items-center justify-center">
+                <Car className="h-6 w-6 text-white drop-shadow" />
               </div>
               <div>
-                <span className="text-2xl font-bold text-white">Bakers Rentals</span>
+                <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-cyan-100 to-fuchsia-100 bg-clip-text text-transparent">
+                  Bakers Rentals
+                </span>
                 <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-white/80" />
-                  <span className="text-sm text-white/80 font-medium">Admin Dashboard</span>
+                  <Shield className="h-4 w-4 text-cyan-300/80" />
+                  <span className="text-sm text-cyan-100/80 font-medium">Admin Dashboard</span>
                 </div>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <div className="glass-effect-dark px-4 py-2 rounded-lg">
-                <span className="text-white/80 text-sm">Welcome, </span>
+              <div className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 backdrop-blur">
+                <span className="text-cyan-100/80 text-sm">Welcome, </span>
                 <span className="text-white font-medium">{adminUser}</span>
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleLogout}
-                className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent"
+                className="btn-3d bg-white/5 hover:bg-white/10 border-white/10 text-white backdrop-blur"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
@@ -153,27 +167,32 @@ function DashboardContent() {
       <section className="py-12 px-4">
         <div className="container mx-auto max-w-7xl">
           <div className="fade-in-up mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-lg">Admin Dashboard</h1>
-            <p className="text-white/80 text-xl">Manage your premium vehicle rental business</p>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-3 drop-shadow">
+              Admin Dashboard
+            </h1>
+            <p className="text-cyan-100/80 text-lg">
+              Manage your premium vehicle rental business
+            </p>
           </div>
 
+          {/* Stats */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
             {statCards.map((stat, index) => (
               <div key={stat.title} className="fade-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
-                <Card className="card-3d tilt-3d border-0 glass-effect-dark group">
+                <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
                   <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-5">
                       <div
-                        className={`w-14 h-14 ${stat.color} rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}
+                        className={`w-14 h-14 ${iconGradients[index % iconGradients.length]} rounded-xl flex items-center justify-center shadow-lg shadow-black/20`}
                       >
                         <stat.icon className="h-7 w-7 text-white" />
                       </div>
-                      <TrendingUp className="h-5 w-5 text-green-400" />
+                      <TrendingUp className="h-5 w-5 text-emerald-400" />
                     </div>
                     <div>
-                      <p className="text-white/70 text-sm font-medium mb-1">{stat.title}</p>
-                      <p className="text-3xl font-bold text-white mb-2">{stat.value}</p>
-                      <p className="text-white/60 text-xs">{stat.hint}</p>
+                      <p className="text-cyan-100/70 text-sm font-medium mb-1">{stat.title}</p>
+                      <p className="text-3xl font-extrabold text-white mb-1">{stat.value}</p>
+                      <p className="text-cyan-100/60 text-xs">{stat.hint}</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -181,22 +200,23 @@ function DashboardContent() {
             ))}
           </div>
 
+          {/* Action cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
             <div className="fade-in-up" style={{ animationDelay: "0.5s" }}>
-              <Card className="card-3d tilt-3d border-0 glass-effect-dark group h-full">
+              <Card className="h-full border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center gap-3 text-white text-xl">
-                    <div className="w-12 h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-sky-500 flex items-center justify-center shadow-lg shadow-black/20">
                       <Car className="h-6 w-6 text-white" />
                     </div>
                     Vehicle Management
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col">
-                  <p className="text-white/70 mb-6 flex-1">
+                  <p className="text-cyan-100/80 mb-6 flex-1">
                     Add, edit, and manage your premium vehicle fleet with advanced controls
                   </p>
-                  <Button asChild className="btn-3d bg-white text-primary hover:bg-white/90 font-bold">
+                  <Button asChild className="btn-3d bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:from-cyan-400 hover:to-fuchsia-400 text-white font-bold shadow-lg shadow-cyan-500/20">
                     <Link href="/admin/vehicles">Manage Fleet</Link>
                   </Button>
                 </CardContent>
@@ -204,20 +224,20 @@ function DashboardContent() {
             </div>
 
             <div className="fade-in-up" style={{ animationDelay: "0.6s" }}>
-              <Card className="card-3d tilt-3d border-0 glass-effect-dark group h-full">
+              <Card className="h-full border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center gap-3 text-white text-xl">
-                    <div className="w-12 h-12 gradient-secondary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-black/20">
                       <Calendar className="h-6 w-6 text-white" />
                     </div>
                     Booking Management
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col">
-                  <p className="text-white/70 mb-6 flex-1">
+                  <p className="text-cyan-100/80 mb-6 flex-1">
                     View and manage customer bookings with advanced filtering and status updates
                   </p>
-                  <Button asChild className="btn-3d bg-white text-secondary hover:bg-white/90 font-bold">
+                  <Button asChild className="btn-3d bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-white font-bold shadow-lg shadow-fuchsia-500/20">
                     <Link href="/admin/bookings">Manage Bookings</Link>
                   </Button>
                 </CardContent>
@@ -225,23 +245,23 @@ function DashboardContent() {
             </div>
 
             <div className="fade-in-up" style={{ animationDelay: "0.7s" }}>
-              <Card className="card-3d tilt-3d border-0 glass-effect-dark group h-full">
+              <Card className="h-full border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center gap-3 text-white text-xl">
-                    <div className="w-12 h-12 gradient-accent rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-black/20">
                       <Settings className="h-6 w-6 text-white" />
                     </div>
                     System Settings
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col">
-                  <p className="text-white/70 mb-6 flex-1">
+                  <p className="text-cyan-100/80 mb-6 flex-1">
                     Manage vehicle categories, locations, and system configurations
                   </p>
                   <Button
                     asChild
                     variant="outline"
-                    className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 font-bold bg-transparent"
+                    className="btn-3d bg-white/5 hover:bg-white/10 border-white/10 text-white font-bold backdrop-blur"
                   >
                     <Link href="/admin/categories">System Settings</Link>
                   </Button>
@@ -250,8 +270,9 @@ function DashboardContent() {
             </div>
           </div>
 
+          {/* Recent Activity */}
           <div className="fade-in-up" style={{ animationDelay: "0.8s" }}>
-            <Card className="card-3d border-0 glass-effect-dark">
+            <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/20">
               <CardHeader>
                 <CardTitle className="text-white text-2xl">Recent Activity</CardTitle>
               </CardHeader>
@@ -259,39 +280,41 @@ function DashboardContent() {
                 <div className="space-y-6">
                   <div className="flex items-center justify-between py-4 border-b border-white/10">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-green-500/20 rounded-full flex items-center justify-center">
-                        <Calendar className="h-5 w-5 text-green-400" />
+                      <div className="w-10 h-10 rounded-full bg-emerald-400/15 flex items-center justify-center ring-1 ring-emerald-400/30">
+                        <Calendar className="h-5 w-5 text-emerald-300" />
                       </div>
                       <div>
                         <p className="font-medium text-white">New booking received</p>
-                        <p className="text-sm text-white/70">Toyota RAV4 - John Smith</p>
+                        <p className="text-sm text-cyan-100/80">Toyota RAV4 - John Smith</p>
                       </div>
                     </div>
-                    <span className="text-sm text-white/60">2 hours ago</span>
+                    <span className="text-sm text-cyan-100/70">2 hours ago</span>
                   </div>
+
                   <div className="flex items-center justify-between py-4 border-b border-white/10">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center">
-                        <Car className="h-5 w-5 text-blue-400" />
+                      <div className="w-10 h-10 rounded-full bg-sky-400/15 flex items-center justify-center ring-1 ring-sky-400/30">
+                        <Car className="h-5 w-5 text-sky-300" />
                       </div>
                       <div>
                         <p className="font-medium text-white">Vehicle returned</p>
-                        <p className="text-sm text-white/70">Honda Odyssey - Sarah Johnson</p>
+                        <p className="text-sm text-cyan-100/80">Honda Odyssey - Sarah Johnson</p>
                       </div>
                     </div>
-                    <span className="text-sm text-white/60">5 hours ago</span>
+                    <span className="text-sm text-cyan-100/70">5 hours ago</span>
                   </div>
+
                   <div className="flex items-center justify-between py-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center">
-                        <Settings className="h-5 w-5 text-purple-400" />
+                      <div className="w-10 h-10 rounded-full bg-fuchsia-400/15 flex items-center justify-center ring-1 ring-fuchsia-400/30">
+                        <Settings className="h-5 w-5 text-fuchsia-300" />
                       </div>
                       <div>
                         <p className="font-medium text-white">New vehicle added</p>
-                        <p className="text-sm text-white/70">Ford Ranger - Pickup category</p>
+                        <p className="text-sm text-cyan-100/80">Ford Ranger - Pickup category</p>
                       </div>
                     </div>
-                    <span className="text-sm text-white/60">1 day ago</span>
+                    <span className="text-sm text-cyan-100/70">1 day ago</span>
                   </div>
                 </div>
               </CardContent>

@@ -365,9 +365,15 @@ export default function VehicleManagement() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-accent via-primary/20 to-secondary/20">
-      {/* Top bar */}
-      <nav className="sticky top-0 z-50 glass-effect-dark border-b border-white/10">
+    <div className="relative min-h-screen overflow-hidden">
+      {/* Aurora background accents (theme only) */}
+      <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-500/10 blur-3xl" />
+      <div className="absolute inset-0 -z-20 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950" />
+
+      {/* Top bar (theme only) */}
+      <nav className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-r from-slate-950/70 via-slate-900/40 to-slate-950/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 sm:space-x-4">
@@ -375,14 +381,14 @@ export default function VehicleManagement() {
                 href="/admin/dashboard"
                 className="flex items-center space-x-2 sm:space-x-3 group"
               >
-                <div className="w-10 h-10 sm:w-12 sm:h-12 gradient-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-black/20 group-hover:scale-110 transition-transform duration-300">
                   <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
                 <div>
-                  <span className="text-xl sm:text-2xl font-bold text-white">
+                  <span className="text-xl sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-cyan-100 to-fuchsia-100 bg-clip-text text-transparent">
                     Bakers Rentals
                   </span>
-                  <p className="text-white/80 text-xs sm:text-sm">
+                  <p className="text-cyan-100/80 text-xs sm:text-sm">
                     Vehicle Management
                   </p>
                 </div>
@@ -392,7 +398,7 @@ export default function VehicleManagement() {
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="btn-3d glass-effect-dark text-white border-white/20 hover:bg-white/10 bg-transparent h-9 px-3 cursor-pointer"
+              className="btn-3d bg-white/5 hover:bg-white/10 border-white/10 text-white backdrop-blur h-9 px-3 cursor-pointer"
             >
               <LogOut className="h-4 w-4 mr-1.5" />
               <span className="hidden sm:inline">Logout</span>
@@ -402,7 +408,7 @@ export default function VehicleManagement() {
       </nav>
 
       {!supabase && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 px-4 py-3">
+        <div className="bg-yellow-400/10 border border-yellow-300/30 text-yellow-100 px-4 py-3">
           <div className="container mx-auto max-w-7xl flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" />
             Supabase is not configured. Set{" "}
@@ -412,15 +418,15 @@ export default function VehicleManagement() {
         </div>
       )}
 
-      {/* Header & Add */}
+      {/* Header & Add (theme only) */}
       <section className="py-8 sm:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
           <div className="flex items-center justify-between mb-6 sm:mb-12">
             <div>
-              <h1 className="text-2xl sm:text-5xl font-bold text-white mb-2 sm:mb-4 drop-shadow-lg">
+              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-2 sm:mb-4 drop-shadow">
                 Vehicle Fleet Management
               </h1>
-              <p className="text-white/80 text-sm sm:text-xl">
+              <p className="text-cyan-100/80 text-sm sm:text-xl">
                 Manage your premium vehicle collection
               </p>
             </div>
@@ -433,7 +439,7 @@ export default function VehicleManagement() {
               }}
             >
               <DialogTrigger asChild>
-                <Button className="btn-3d pulse-glow bg-white text-primary hover:bg-white/90 font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg cursor-pointer">
+                <Button className="btn-3d bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:from-cyan-400 hover:to-fuchsia-400 text-white font-bold h-9 px-3 text-sm sm:h-auto sm:px-8 sm:py-6 sm:text-lg cursor-pointer shadow-lg shadow-cyan-500/20">
                   <Plus className="h-4 w-4 sm:h-5 sm:w-5 mr-1.5 sm:mr-2" />
                   <span>Add Vehicle</span>
                 </Button>
@@ -443,16 +449,15 @@ export default function VehicleManagement() {
                 aria-describedby="add-vehicle-desc"
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 onCloseAutoFocus={(e) => e.preventDefault()}
-                className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+                className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
               >
-                <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
                 <DialogHeader>
                   <DialogTitle className="text-white text-xl sm:text-2xl">
                     Add New Vehicle
                   </DialogTitle>
                   <DialogDescription
                     id="add-vehicle-desc"
-                    className="text-white/80"
+                    className="text-cyan-100/80"
                   >
                     Upload a photo and fill in the vehicle details. Fields
                     marked * are required.
@@ -468,14 +473,16 @@ export default function VehicleManagement() {
             </Dialog>
           </div>
 
-          {/* Vehicle list */}
-          <VehicleList
-            vehicles={vehicles}
-            onEdit={openEditDialog}
-            onDelete={handleDeleteVehicle}
-          />
+          {/* Vehicle list (wrapped for theme only) */}
+          <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.03] backdrop-blur-md">
+            <VehicleList
+              vehicles={vehicles}
+              onEdit={openEditDialog}
+              onDelete={handleDeleteVehicle}
+            />
+          </div>
 
-          {/* Edit dialog */}
+          {/* Edit dialog (theme only) */}
           <Dialog
             open={isEditDialogOpen}
             onOpenChange={(o) => {
@@ -488,16 +495,15 @@ export default function VehicleManagement() {
               aria-describedby="edit-vehicle-desc"
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto glass-effect-dark border-white/20 backdrop-blur-md data-[state=open]:bg-black/20"
+              className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
             >
-              <div className="pointer-events-none fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" />
               <DialogHeader>
                 <DialogTitle className="text-white text-xl sm:text-2xl">
                   Edit Vehicle
                 </DialogTitle>
                 <DialogDescription
                   id="edit-vehicle-desc"
-                  className="text-white/80"
+                  className="text-cyan-100/80"
                 >
                   Update details or upload a new photo for this vehicle.
                 </DialogDescription>
