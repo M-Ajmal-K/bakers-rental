@@ -14,18 +14,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Car, Plus, LogOut, AlertTriangle } from "lucide-react";
+import { Car, Plus, LogOut, AlertTriangle, Filter } from "lucide-react";
 
 import VehicleForm from "./VehicleForm";
 import VehicleList from "./VehicleList";
 import { FormState, Vehicle } from "./VehicleTypes";
-import { format } from "date-fns"; // ⬅️ added
+import { format } from "date-fns"; // ⬅️ existing
+
+// Admin filters to mirror customer side
+const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
+const availabilityOptions = ["All", "Available", "Unavailable"] as const;
+type AvailabilityFilter = (typeof availabilityOptions)[number];
 
 export default function VehicleManagement() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+
+  // NEW: admin-side filters
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const [availabilityFilter, setAvailabilityFilter] =
+    useState<AvailabilityFilter>("All");
+  const [showFilters, setShowFilters] = useState(false); // mobile toggle
 
   const [formData, setFormData] = useState<FormState>({
     name: "",
@@ -118,6 +129,18 @@ export default function VehicleManagement() {
 
     load();
   }, []);
+
+  /* ---------------- Derived: filtered list for admin view ---------------- */
+  const filteredVehicles = vehicles.filter((v) => {
+    const categoryOK = selectedCategory === "All" || v.category === selectedCategory;
+    const availOK =
+      availabilityFilter === "All"
+        ? true
+        : availabilityFilter === "Available"
+        ? v.available
+        : !v.available; // "Unavailable"
+    return categoryOK && availOK;
+  });
 
   /* ---------------- Helpers ---------------- */
   const resetForm = useCallback(() => {
@@ -314,7 +337,7 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         pricePerDay: Number(formData.pricePerDay || "0"),
         licensePlate: formData.licensePlate,
-        available: formData.available, // will still be overridden by today's status on next load
+        available: formData.available, // overridden by today's status on next load
         image: newPublicUrl,
         imagePath: newImagePath ?? editingVehicle.imagePath,
         category: formData.category,
@@ -421,7 +444,7 @@ export default function VehicleManagement() {
       {/* Header & Add (theme only) */}
       <section className="py-8 sm:py-12 px-4">
         <div className="container mx-auto max-w-7xl">
-          <div className="flex items-center justify-between mb-6 sm:mb-12">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
             <div>
               <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-2 sm:mb-4 drop-shadow">
                 Vehicle Fleet Management
@@ -473,10 +496,75 @@ export default function VehicleManagement() {
             </Dialog>
           </div>
 
+          {/* NEW: Filters (category + availability) */}
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowFilters((s) => !s)}
+                  className="sm:hidden bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                >
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filters
+                </Button>
+                <span className="hidden sm:inline text-cyan-100/80 text-sm">
+                  Filter your fleet
+                </span>
+              </div>
+              <div className="hidden sm:block bg-white/5 text-white/90 px-3 py-1 rounded-lg text-sm">
+                {filteredVehicles.length} vehicle
+                {filteredVehicles.length !== 1 ? "s" : ""} shown
+              </div>
+            </div>
+
+            <div className={`${showFilters ? "block" : "hidden sm:block"}`}>
+              {/* Category chips */}
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap py-2 -mx-1 px-1">
+                {categories.map((cat) => (
+                  <Button
+                    key={cat}
+                    size="sm"
+                    variant={selectedCategory === cat ? "default" : "outline"}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={
+                      selectedCategory === cat
+                        ? "bg-white text-slate-900 font-semibold"
+                        : "bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                    }
+                  >
+                    {cat}
+                  </Button>
+                ))}
+              </div>
+
+              {/* Availability chips */}
+              <div className="mt-3 flex gap-2 overflow-x-auto whitespace-nowrap py-2 -mx-1 px-1">
+                {availabilityOptions.map((opt) => (
+                  <Button
+                    key={opt}
+                    size="sm"
+                    variant={availabilityFilter === opt ? "default" : "outline"}
+                    onClick={() => setAvailabilityFilter(opt)}
+                    className={
+                      availabilityFilter === opt
+                        ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white font-semibold"
+                        : "bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                    }
+                  >
+                    {opt}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Vehicle list (wrapped for theme only) */}
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.03] backdrop-blur-md">
+            {/* ← filtered here */}
             <VehicleList
-              vehicles={vehicles}
+              vehicles={filteredVehicles} 
               onEdit={openEditDialog}
               onDelete={handleDeleteVehicle}
             />
