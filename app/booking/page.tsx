@@ -12,12 +12,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Car, CalendarIcon, MapPin, User, CheckCircle, Sparkles, Edit } from "lucide-react";
+import {
+  Car,
+  CalendarIcon,
+  MapPin,
+  User,
+  CheckCircle,
+  Sparkles,
+  Edit,
+  MessageCircle,
+  Wallet,
+  FileCheck2,
+  Landmark,
+  Banknote,
+  Smartphone
+} from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { Vehicle } from "@/components/vehicles/VehicleTypes";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog";
 
 /* -------------------------------- Helpers -------------------------------- */
 
@@ -40,6 +62,21 @@ function atStartOfDay(d: Date) {
   return x;
 }
 
+// Parse "YYYY-MM-DD" as **local** midnight (prevents UTC shift).
+function parseDateOnlyToLocal(dateLike: string | Date): Date {
+  if (dateLike instanceof Date) return atStartOfDay(dateLike);
+  if (typeof dateLike === "string") {
+    if (dateLike.includes("T")) {
+      // Full ISO; trust it but normalize to local midnight.
+      return atStartOfDay(new Date(dateLike));
+    }
+    // "YYYY-MM-DD" — construct as local date.
+    const [y, m, d] = dateLike.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  }
+  return atStartOfDay(new Date(dateLike));
+}
+
 function isSameOrBefore(a: Date, b: Date) {
   return atStartOfDay(a).getTime() <= atStartOfDay(b).getTime();
 }
@@ -56,6 +93,38 @@ function rangesOverlap(aStart: Date, aEnd: Date, r: BookedRange) {
   const e2 = atStartOfDay(r.end).getTime();
   return s1 <= e2 && s2 <= e1;
 }
+
+/* ---------------- Env for WhatsApp CTA (client-safe NEXT_PUBLIC_*) -------- */
+const WHATSAPP_PHONE =
+  (process.env.NEXT_PUBLIC_WHATSAPP_PHONE || "").replace(/\D/g, "") || "6790000000";
+const WHATSAPP_MSG_PREFIX =
+  process.env.NEXT_PUBLIC_WHATSAPP_MESSAGE_PREFIX ||
+  "Hi Bakers Rentals, I've sent my payment receipt. My booking code is";
+
+/* ---------------- Payment Information (as provided) ---------------- */
+
+const BANK = {
+  accountName: "BAKERS RENTAL CARS",
+  bank: "BSP",
+  accountNumber: "10332514",
+  swift: "BOSPFJFJ",
+  bsb: "069_014",
+  poBox: "P.O BOX 1949 SIGATOKA",
+  address: "KULUKULU SIGATOKA, FIJI ISLAND",
+};
+
+const RECEIVER = {
+  fullName: "SAH MURSAD KHAN",
+  address: "KULUKULU SIGATOKA",
+  poBox: "P.O BOX 1949 SIGATOKA",
+  licenceNumber: "381170",
+};
+
+const WALLET = {
+  provider: "VODAFONE",
+  number: "8716960",
+  phoneContact: "+6798716960",
+};
 
 /* -------------------------------- Component -------------------------------- */
 
@@ -77,6 +146,9 @@ export default function BookingPage() {
   });
   const [showSummary, setShowSummary] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showPayment, setShowPayment] = useState(false); // NEW
+  const [bookingCode, setBookingCode] = useState<string | null>(null); // show code after create
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // availability state
   const [bookedRanges, setBookedRanges] = useState<BookedRange[]>([]);
@@ -149,28 +221,25 @@ export default function BookingPage() {
 
       setLoadingAvail(true);
       try {
-        // 🔁 Use LOCAL date string (not UTC ISO slice)
-        const todayLocal = format(atStartOfDay(new Date()), "yyyy-MM-dd");
-
-        const { data, error } = await supabase
-          .from("bookings")
-          .select("start_date, end_date, status")
-          .eq("vehicle_id", selectedVehicle)
-          .eq("status", "confirmed")
-          .gte("end_date", todayLocal)
-          .order("start_date", { ascending: true });
-
-        if (error) {
-          console.error("[BookingPage] fetch bookings error:", error);
+        // Use secure server API (blocks CONFIRMED and recent PENDING holds)
+        const res = await fetch(`/api/availability/${selectedVehicle}?includePending=1`);
+        if (!res.ok) {
+          const msg = await res.text();
+          console.error("[BookingPage] availability API error:", msg);
           return;
         }
+        const payload = await res.json(); // { ranges: [{start, end}, ...] }
 
-        const ranges: BookedRange[] = (data || []).map((r: any) => ({
-          start: atStartOfDay(new Date(r.start_date)),
-          end: atStartOfDay(new Date(r.end_date)),
-        }));
+        const ranges: BookedRange[] = (payload?.ranges ?? [])
+          .map((r: any) => ({
+            start: parseDateOnlyToLocal(r.start),
+            end: parseDateOnlyToLocal(r.end),
+          }))
+          .sort((a: BookedRange, b: BookedRange) => a.start.getTime() - b.start.getTime());
 
         setBookedRanges(ranges);
+      } catch (e) {
+        console.error("[BookingPage] availability API error:", e);
       } finally {
         setLoadingAvail(false);
       }
@@ -204,24 +273,21 @@ export default function BookingPage() {
   /* ---------------- Calendar disabled + cross-out helpers ---------------- */
   const todayStart = atStartOfDay(new Date());
 
-  const isDateBooked = (d?: Date) => {
-    if (!d) return false;
-    return bookedRanges.some((r) => dateInRange(d, r));
-  };
-
-  const pickupDisabled = (date: Date) => {
-    return atStartOfDay(date) < todayStart || isDateBooked(date);
-  };
-
-  const returnDisabled = (date: Date) => {
-    const lowerBound = pickupDate ? atStartOfDay(pickupDate) : todayStart;
-    return atStartOfDay(date) < lowerBound || isDateBooked(date);
-  };
-
-  // Build DayPicker "matchers" for the booked ranges so we can style them (cross-out)
-  const unavailableMatchers = useMemo(
+  // Build DayPicker "matchers" for the booked ranges (for both styling and disabling)
+  const rangeMatchers = useMemo(
     () => bookedRanges.map((r) => ({ from: r.start, to: r.end })),
     [bookedRanges]
+  );
+
+  // Use DayPicker's native disabled matchers instead of callback functions
+  const pickupDisabledMatchers = useMemo(
+    () => [{ before: todayStart }, ...rangeMatchers],
+    [todayStart, rangeMatchers]
+  );
+
+  const returnDisabledMatchers = useMemo(
+    () => [{ before: pickupDate ? atStartOfDay(pickupDate) : todayStart }, ...rangeMatchers],
+    [pickupDate, todayStart, rangeMatchers]
   );
 
   // Class to visually cross booked days (without changing your theme)
@@ -250,6 +316,7 @@ export default function BookingPage() {
   /* ---------------- Submit & Confirm ---------------- */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
     if (
       pickupDate &&
       returnDate &&
@@ -272,8 +339,6 @@ export default function BookingPage() {
   };
 
   const handleConfirmBooking = async () => {
-    if (!supabase) return;
-
     if (!pickupDate || !returnDate || !selectedVehicleData) {
       alert("Missing details to confirm.");
       return;
@@ -288,45 +353,42 @@ export default function BookingPage() {
     }
 
     setConfirming(true);
+    setErrorMsg(null);
     try {
-      const payload: any = {
-        vehicle_id: selectedVehicle, // uuid string
-        // 🔁 Use LOCAL date strings for DATE columns (avoid UTC day shift)
+      // Build payload using YOUR real column names
+      const payload = {
+        vehicle_id: selectedVehicle,
         start_date: format(atStartOfDay(pickupDate), "yyyy-MM-dd"),
         end_date: format(atStartOfDay(returnDate), "yyyy-MM-dd"),
         pickup_location: pickupLocation,
         dropoff_location: dropoffLocation,
         customer_name: customerInfo.name,
-        contact_number: customerInfo.phone, // your column name
-        email: customerInfo.email,          // your column name
-        status: "confirmed",
+        contact_number: customerInfo.phone,
+        email: customerInfo.email,
         total_price: calculateTotal(),
-        // notes removed — your table doesn't have this column
       };
 
-      const { error } = await supabase.from("bookings").insert(payload);
+      // ✅ Call server API (uses service-role) instead of client insert (which triggers RLS)
+      const res = await fetch("/api/bookings/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-      if (error) {
-        if (
-          (error as any).code === "23P01" ||
-          String(error?.message || "").toLowerCase().includes("no_overlapping_bookings")
-        ) {
-          alert(
-            "Sorry, those dates just became unavailable for this vehicle. Please choose a different range."
-          );
-          setShowSummary(false);
-          return;
-        }
-        console.error("[BookingPage] insert booking error:", error);
-        alert(error.message || "Failed to confirm booking. Please try again.");
+      if (!res.ok) {
+        const msg = await res.text();
+        console.error("[BookingPage] create API error:", msg);
+        setErrorMsg(msg || "Failed to confirm booking. Please try again.");
         return;
       }
 
+      const data = await res.json(); // { id, code, status }
+      setBookingCode(data?.code ?? null);
       setShowSuccess(true);
-      setTimeout(() => {
-        setShowSuccess(false);
-        setShowSummary(false);
-      }, 3000);
+      setShowPayment(true); // show payment dialog immediately
+    } catch (err: any) {
+      console.error("[BookingPage] create API error:", err);
+      setErrorMsg(err?.message || "Failed to confirm booking. Please try again.");
     } finally {
       setConfirming(false);
     }
@@ -334,8 +396,177 @@ export default function BookingPage() {
 
   /* ---------------- SUCCESS SCREEN ---------------- */
   if (showSuccess) {
+    const waHref = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(
+      `${WHATSAPP_MSG_PREFIX} ${bookingCode || ""}`
+    )}`;
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
+        {/* Payment dialog (auto-opened) */}
+        <Dialog open={showPayment} onOpenChange={setShowPayment}>
+          <DialogContent
+            className={cn(
+              // width
+              "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl",
+              // height clamp -> use dvh so mobile browser UI doesn't break layout
+              "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
+              // structure
+              "p-0 overflow-hidden rounded-2xl border-0 flex flex-col",
+              // shadow
+              "shadow-[0_20px_60px_-10px_rgba(0,0,0,0.5)]"
+            )}
+          >
+            {/* Top bar to match theme */}
+            <div className="relative overflow-hidden flex-shrink-0">
+              <div className="gradient-primary h-20 sm:h-24 w-full" />
+              <div className="absolute inset-0 bg-black/10" />
+              <div className="absolute inset-0 flex items-center justify-between px-4 sm:px-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+                    <Wallet className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-white text-base sm:text-lg">
+                      Payment Instructions
+                    </DialogTitle>
+                    <DialogDescription className="text-white/80 text-xs sm:text-sm">
+                      Choose your preferred method below. Send your receipt & booking code via WhatsApp.
+                    </DialogDescription>
+                  </div>
+                </div>
+
+                {bookingCode && (
+                  <div className="hidden sm:flex items-center gap-2">
+                    <span className="text-white/80 text-xs">Booking Code</span>
+                    <span className="font-mono text-sm font-semibold text-white bg-black/30 px-3 py-1.5 rounded-md">
+                      {bookingCode}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+              {/* Mobile booking code pill */}
+              {bookingCode && (
+                <div className="sm:hidden flex justify-center">
+                  <div className="font-mono text-xs font-semibold text-foreground bg-muted px-3 py-1.5 rounded-md">
+                    Code: {bookingCode}
+                  </div>
+                </div>
+              )}
+
+              {/* Summary row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
+                  <p className="text-xs text-muted-foreground">Total Due</p>
+                  <p className="text-lg font-semibold">${calculateTotal()}</p>
+                </div>
+                <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
+                  <p className="text-xs text-muted-foreground">Contact (Wallet)</p>
+                  <p className="text-sm font-medium break-words">{WALLET.phoneContact}</p>
+                </div>
+              </div>
+
+              {/* Bank Transfer */}
+              <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_25px_-5px_rgba(0,0,0,0.3)]">
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                    <Landmark className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                    <h3 className="text-sm sm:text-base font-semibold text-foreground">
+                      Direct Bank Transfer
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
+                    <InfoBox label="Account Name" value={BANK.accountName} />
+                    <InfoBox label="Bank" value={BANK.bank} />
+                    <InfoBox label="Account Number" value={BANK.accountNumber} />
+                    <InfoBox label="SWIFT Code" value={BANK.swift} />
+                    <InfoBox label="BSB" value={BANK.bsb} />
+                    <InfoBox label="P.O. Box" value={BANK.poBox} />
+                    <InfoBox label="Address" value={BANK.address} className="sm:col-span-2" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Western Union / MoneyGram / M-PAiSA */}
+              <div className="rounded-xl border border-border/40 bg-gradient-to-br from-primary/5 to-secondary/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_25px_-5px_rgba(0,0,0,0.3)]">
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                    <Banknote className="h-4 w-4 sm:h-5 sm:w-5 text-secondary" />
+                    <h3 className="text-sm sm:text-base font-semibold text-foreground">
+                      Western Union / MoneyGram / M-PAiSA
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
+                    <InfoBox label="Full Name" value={RECEIVER.fullName} />
+                    <InfoBox label="Licence Number" value={RECEIVER.licenceNumber} />
+                    <InfoBox label="Address" value={RECEIVER.address} />
+                    <InfoBox label="P.O. Box" value={RECEIVER.poBox} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Mobile Wallet (Vodafone) */}
+              <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_25px_-5px_rgba(0,0,0,0.3)]">
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                    <Smartphone className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                    <h3 className="text-sm sm:text-base font-semibold text-foreground">
+                      Mobile Wallet ({WALLET.provider})
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
+                    <InfoBox label="Wallet Number" value={WALLET.number} />
+                    <InfoBox label="Phone Contact" value={WALLET.phoneContact} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Steps / Notes */}
+              <div className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_10px_25px_-5px_rgba(0,0,0,0.3)]">
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                    <FileCheck2 className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                    <h3 className="text-sm sm:text-base font-semibold text-foreground">What to do next</h3>
+                  </div>
+                  <ol className="space-y-2 sm:space-y-2.5 text-sm">
+                    <li className="flex gap-2">
+                      <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">1</span>
+                      <span>Send your payment using one of the methods above with the exact details.</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">2</span>
+                      <span>Keep your receipt (and MTCN for Western Union / MoneyGram).</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">3</span>
+                      <span>
+                        Tap <strong>Open WhatsApp</strong> below and send us your receipt + booking code{" "}
+                        <span className="font-mono font-semibold">{bookingCode || "(pending…)"}</span>.
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="px-4 sm:px-6 py-4 sm:py-5 bg-background/70 border-t border-border/40 gap-2 sm:gap-3 flex-shrink-0">
+              <Button asChild className="w-full sm:w-auto btn-3d bg-green-600 hover:bg-green-600/90">
+                <a href={waHref} target="_blank" rel="noopener">
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Open WhatsApp
+                </a>
+              </Button>
+              <Button variant="outline" onClick={() => setShowPayment(false)} className="w-full sm:w-auto">
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Success card (your original styling kept) */}
         <div className="text-center fade-in-up animate px-4">
           <div className="relative mb-6 md:mb-8">
             <div className="w-24 h-24 md:w-32 md:h-32 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 animate-bounce">
@@ -348,13 +579,24 @@ export default function BookingPage() {
               <Sparkles className="h-5 w-5 md:h-6 md:w-6 text-primary animate-pulse" style={{ animationDelay: "0.5s" }} />
             </div>
           </div>
-          <h1 className="text-2xl md:text-4xl font-bold text-foreground mb-3 md:mb-4">Booking Confirmed!</h1>
-          <p className="text-base md:text-xl text-muted-foreground mb-6 md:mb-8 max-w-md mx-auto">
-            Your vehicle reservation has been successfully confirmed. You will receive a confirmation email shortly.
+          <h1 className="text-2xl md:text-4xl font-bold text-foreground mb-3 md:mb-4">Booking Created!</h1>
+          <p className="text-base md:text-xl text-muted-foreground mb-3 md:mb-4 max-w-md mx-auto">
+            Your booking has been created and is <strong>pending confirmation</strong>.
           </p>
-          <Button asChild className="btn-3d bg-primary hover:bg-primary/90 text-base md:text-lg px-6 md:px-8 py-4 md:py-6">
-            <Link href="/">Return Home</Link>
-          </Button>
+          {bookingCode && (
+            <p className="text-sm md:text-base text-foreground mb-6">
+              Your booking code: <span className="font-mono font-bold">{bookingCode}</span>
+            </p>
+          )}
+
+          <div className="flex items-center gap-3 justify-center">
+            <Button onClick={() => setShowPayment(true)} className="btn-3d bg-primary hover:bg-primary/90">
+              View Payment Instructions
+            </Button>
+            <Button asChild className="btn-3d bg-primary hover:bg-primary/90 text-base md:text-lg px-6 md:px-8 py-4 md:py-6">
+              <Link href="/">Return Home</Link>
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -504,6 +746,10 @@ export default function BookingPage() {
                     </CardContent>
                   </Card>
 
+                  {errorMsg && (
+                    <p className="text-red-600 text-center text-sm md:text-base">{errorMsg}</p>
+                  )}
+
                   <div className="flex gap-3 md:gap-4 pt-2 md:pt-4">
                     <Button
                       variant="outline"
@@ -634,8 +880,9 @@ export default function BookingPage() {
                                 mode="single"
                                 selected={pickupDate}
                                 onSelect={setPickupDate}
-                                disabled={pickupDisabled}
-                                modifiers={{ unavailable: unavailableMatchers }}
+                                disabled={pickupDisabledMatchers}
+                                // visual cross-out, optional but nice
+                                modifiers={{ unavailable: rangeMatchers }}
                                 modifiersClassNames={{ unavailable: unavailableClass }}
                                 initialFocus
                               />
@@ -681,8 +928,8 @@ export default function BookingPage() {
                                 mode="single"
                                 selected={returnDate}
                                 onSelect={setReturnDate}
-                                disabled={returnDisabled}
-                                modifiers={{ unavailable: unavailableMatchers }}
+                                disabled={returnDisabledMatchers}
+                                modifiers={{ unavailable: rangeMatchers }}
                                 modifiersClassNames={{ unavailable: unavailableClass }}
                                 initialFocus
                               />
@@ -935,6 +1182,24 @@ export default function BookingPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Small helper component for neat value boxes in dialog ---------- */
+function InfoBox({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string | number;
+  className?: string;
+}) {
+  return (
+    <div className={cn("rounded-lg bg-background/60 border border-border/30 p-3", className)}>
+      <p className="text-muted-foreground text-xs">{label}</p>
+      <p className="font-medium break-words">{value}</p>
     </div>
   );
 }

@@ -28,7 +28,6 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     if (!isMounted) return
-
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up")
       elements.forEach((el) => {
@@ -38,8 +37,7 @@ export default function AdminLoginPage() {
         }
       })
     }
-
-    handleVisibility() // Check on mount
+    handleVisibility()
   }, [isMounted])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,15 +46,23 @@ export default function AdminLoginPage() {
     setError("")
 
     try {
-      if (credentials.username === "admin" && credentials.password === "bakers2024") {
-        if (typeof window !== "undefined" && window.localStorage) {
-          localStorage.setItem("adminAuth", "true")
-          localStorage.setItem("adminUser", credentials.username)
-        }
-        router.push("/admin/dashboard")
-      } else {
-        setError("Invalid username or password")
+      // Only the password matters for the server auth.
+      const res = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include", // ensure cookie is set/kept
+        body: JSON.stringify({ password: credentials.password }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok || !data?.ok) {
+        setError(String(data?.error || "Invalid username or password"))
+        return
       }
+
+      // we’re authenticated (cookie set). Go to dashboard.
+      router.push("/admin/dashboard")
     } catch (err) {
       console.error("Login error:", err)
       setError("An error occurred during login. Please try again.")
@@ -65,9 +71,7 @@ export default function AdminLoginPage() {
     }
   }
 
-  if (!isMounted) {
-    return null
-  }
+  if (!isMounted) return null
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -128,7 +132,7 @@ export default function AdminLoginPage() {
                 <p className="text-white/80 mt-2">Sign in to access the admin dashboard</p>
               </CardHeader>
               <CardContent className="space-y-6">
-                <form onSubmit={handleSubmit} className="space-y-6">
+                <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
                   {error && (
                     <Alert variant="destructive" className="bg-red-500/20 border-red-500/30 text-white">
                       <AlertDescription>{error}</AlertDescription>
@@ -143,6 +147,7 @@ export default function AdminLoginPage() {
                       <User className="absolute left-4 top-4 h-5 w-5 text-white/60" />
                       <Input
                         id="username"
+                        name="username"
                         type="text"
                         placeholder="Enter username"
                         value={credentials.username}
@@ -150,6 +155,7 @@ export default function AdminLoginPage() {
                         className="pl-12 h-14 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
                         required
                         disabled={isLoading}
+                        autoComplete="username"
                       />
                     </div>
                   </div>
@@ -162,6 +168,7 @@ export default function AdminLoginPage() {
                       <Lock className="absolute left-4 top-4 h-5 w-5 text-white/60" />
                       <Input
                         id="password"
+                        name="password"
                         type="password"
                         placeholder="Enter password"
                         value={credentials.password}
@@ -169,6 +176,7 @@ export default function AdminLoginPage() {
                         className="pl-12 h-14 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
                         required
                         disabled={isLoading}
+                        autoComplete="current-password"
                       />
                     </div>
                   </div>
@@ -185,7 +193,7 @@ export default function AdminLoginPage() {
                 <div className="text-center pt-4">
                   <div className="glass-effect-dark p-4 rounded-lg">
                     <p className="text-white/80 text-sm font-medium mb-2">Demo Credentials</p>
-                    <p className="text-white text-sm font-mono">admin / bakers2024</p>
+                    <p className="text-white text-sm font-mono">admin / password123</p>
                   </div>
                 </div>
               </CardContent>

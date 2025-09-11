@@ -15,7 +15,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react"
+// (supabase import left in place, even though we don't use it now — harmless)
 import { supabase } from "@/lib/supabaseClient"
+import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton"
 
 /* -------------------------------------------------------------------------- */
 /*                             Types / Status Map                              */
@@ -23,7 +25,6 @@ import { supabase } from "@/lib/supabaseClient"
 
 const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const
 
-// Themed for dark UI (visual-only change)
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30",
   confirmed: "bg-green-500/15 text-green-200 ring-1 ring-green-400/30",
@@ -59,16 +60,20 @@ const MobileBookingCard = memo(function MobileBookingCard({
   onView,
   onEdit,
   onDelete,
+  onConfirmed,
   getStatusBadge,
   calculateDays,
 }: {
   booking: Booking
   onView: (b: Booking) => void
   onEdit: (b: Booking) => void
-  onDelete: (id: string) => void
+  onDelete: (id: string) => void | Promise<void> // widened to allow async
+  onConfirmed: (id: string) => void
   getStatusBadge: (s: string) => JSX.Element
   calculateDays: (a: string, b: string) => number
 }) {
+  const isPending = String(booking.status).toLowerCase() === "pending"
+
   return (
     <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10">
       <CardContent className="p-4 space-y-3">
@@ -139,6 +144,13 @@ const MobileBookingCard = memo(function MobileBookingCard({
           >
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
           </Button>
+
+          {isPending && (
+            <ConfirmBookingButton
+              id={booking.id}
+              onDone={() => onConfirmed(booking.id)}
+            />
+          )}
         </div>
       </CardContent>
     </Card>
@@ -163,7 +175,6 @@ function BookingManagementContent() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Ensure fade-ins are visible
   useEffect(() => {
     const activate = () => {
       document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
@@ -179,71 +190,50 @@ function BookingManagementContent() {
     router.push("/admin/login")
   }
 
-  /* --------------------------- Fetch real bookings -------------------------- */
+  /* --------------------------- Fetch bookings via API --------------------------- */
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true)
       setLoadError(null)
       try {
-        // 1) Pull bookings
-        const { data: rawBookings } = await supabase
-          .from("bookings")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .throwOnError()
-
-        const rows = rawBookings || []
-        const vehicleIds = Array.from(new Set(rows.map((r: any) => r.vehicle_id).filter(Boolean)))
-
-        // 2) Pull vehicle titles + registration_number
-        let vehicleMap: Record<string, { title: string; plate: string }> = {}
-        if (vehicleIds.length > 0) {
-          const { data: vehData } = await supabase
-            .from("vehicles")
-            .select("id, title, registration_number")
-            .in("id", vehicleIds)
-            .throwOnError()
-
-          vehicleMap = (vehData || []).reduce((acc: Record<string, { title: string; plate: string }>, v: any) => {
-            acc[v.id] = { title: v.title || "(Untitled Vehicle)", plate: v.registration_number ?? "" }
-            return acc
-          }, {})
+        const res = await fetch("/api/admin/bookings/list", { cache: "no-store" })
+        if (!res.ok) {
+          const msg = await res.text()
+          throw new Error(msg || "Failed to fetch bookings")
         }
+        const json = await res.json()
+        const rows = Array.isArray(json.items) ? json.items : []
 
-        // 3) Map DB rows to UI Booking shape
         const mapped: Booking[] = rows.map((r: any) => {
           const id: string = r.id
           const created = r.created_at || new Date().toISOString()
           const ref = `BK-${format(new Date(created), "yyyy")}-${String(id).slice(0, 6).toUpperCase()}`
-          const vehMeta = vehicleMap[r.vehicle_id] || { title: "(Unknown Vehicle)", plate: "" }
+          const veh = r._vehicle || { title: "(Unknown Vehicle)", registration_number: "" }
           return {
             id,
             bookingRef: ref,
             customerName: r.customer_name ?? "",
-            customerEmail: r.customer_email ?? "",
-            customerPhone: r.customer_phone ?? "",
+            customerEmail: r.customer_email ?? r.email ?? "",
+            customerPhone: r.customer_phone ?? r.contact_number ?? "",
             vehicleId: r.vehicle_id,
-            vehicleName: vehMeta.title,
-            vehiclePlate: vehMeta.plate,
+            vehicleName: veh.title,
+            vehiclePlate: veh.registration_number ?? "",
             pickupDate: r.start_date,
             returnDate: r.end_date,
             pickupLocation: r.pickup_location ?? "",
             dropoffLocation: r.dropoff_location ?? "",
             totalAmount: Number(r.total_price ?? 0),
-            status: r.status ?? "pending",
+            status: String(r.status ?? "pending").toLowerCase(),
             createdAt: created,
-            notes: "",
+            notes: r.notes ?? "",
           }
         })
 
         setBookings(mapped)
         setFilteredBookings(mapped)
       } catch (err: any) {
-        const msg =
-          err?.message ||
-          "Failed to load bookings. If Row Level Security is enabled, ensure a SELECT policy allows reading bookings."
-        console.error("[Admin/Bookings] fetch bookings error detail:", err)
-        setLoadError(msg)
+        console.error("[Admin/Bookings] list API error:", err)
+        setLoadError(err?.message || "Failed to load bookings.")
         setBookings([])
         setFilteredBookings([])
       } finally {
@@ -254,7 +244,7 @@ function BookingManagementContent() {
     fetchData()
   }, [])
 
-  // Filter bookings on changes (include plate in search)
+  // Filter
   useEffect(() => {
     let filtered = bookings
     if (statusFilter !== "all") filtered = filtered.filter((b) => String(b.status) === statusFilter)
@@ -292,10 +282,26 @@ function BookingManagementContent() {
     setSelectedBooking(null)
   }
 
-  // Local-only (MVP)
-  const handleDeleteBooking = (id: string) => {
-    if (confirm("Are you sure you want to delete this booking (local-only)?")) {
+  // UPDATED: real delete via API (keeps existing Delete button)
+  const handleDeleteBooking = async (id: string) => {
+    const sure = confirm("Are you sure you want to delete this booking?")
+    if (!sure) return
+    try {
+      const res = await fetch("/api/admin/bookings/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok) {
+        const msg = await res.text()
+        alert(msg || "Failed to delete booking.")
+        return
+      }
+      // Remove from UI on success
       setBookings((prev) => prev.filter((b) => b.id !== id))
+    } catch (err: any) {
+      console.error("[Admin/Bookings] delete error:", err)
+      alert(err?.message || "Failed to delete booking.")
     }
   }
 
@@ -316,6 +322,10 @@ function BookingManagementContent() {
     return days || 1
   }
 
+  const markConfirmed = (id: string) => {
+    setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: "confirmed" } : b)))
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden">
       {/* Aurora background accents */}
@@ -324,7 +334,7 @@ function BookingManagementContent() {
       <div className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-violet-500/10 blur-3xl" />
       <div className="absolute inset-0 -z-20 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950" />
 
-      {/* Top nav (themed) */}
+      {/* Top nav */}
       <nav className="sticky top-0 z-50 border-b border-white/10 bg-gradient-to-r from-slate-950/70 via-slate-900/40 to-slate-950/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
@@ -363,7 +373,6 @@ function BookingManagementContent() {
             </p>
           </div>
 
-          {/* Optional inline error */}
           {loadError && (
             <div className="fade-in-up mb-6">
               <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
@@ -417,7 +426,7 @@ function BookingManagementContent() {
             </Card>
           </div>
 
-          {/* Mobile: Card list */}
+          {/* Mobile list */}
           <div className="grid gap-4 md:hidden">
             {filteredBookings.map((booking) => (
               <MobileBookingCard
@@ -426,6 +435,7 @@ function BookingManagementContent() {
                 onView={handleViewBooking}
                 onEdit={handleEditBooking}
                 onDelete={handleDeleteBooking}
+                onConfirmed={markConfirmed}
                 getStatusBadge={getStatusBadge}
                 calculateDays={calculateDays}
               />
@@ -439,7 +449,7 @@ function BookingManagementContent() {
             )}
           </div>
 
-          {/* Desktop/Tablet: Table */}
+          {/* Desktop table */}
           <div className="fade-in-up hidden md:block" style={{ animationDelay: "0.4s" }}>
             <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
               <CardHeader>
@@ -463,72 +473,82 @@ function BookingManagementContent() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredBookings.map((booking) => (
-                        <TableRow key={booking.id} className="border-white/10 hover:bg-white/5">
-                          <TableCell>
-                            <div>
-                              <p className="font-medium text-white">{booking.bookingRef}</p>
-                              <p className="text-sm text-white/70">
-                                {format(new Date(booking.createdAt), "MMM dd, yyyy")}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium text-white">{booking.customerName}</p>
-                              <p className="text-sm text-white/70">{booking.customerEmail}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium text-white">{booking.vehicleName}</p>
-                          </TableCell>
-                          <TableCell>
-                            <p className="text-white">{booking.vehiclePlate || "-"}</p>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              <p className="text-white">
-                                {format(new Date(booking.pickupDate), "MMM dd")} -{" "}
-                                {format(new Date(booking.returnDate), "MMM dd")}
-                              </p>
-                              <p className="text-white/70">
-                                {calculateDays(booking.pickupDate, booking.returnDate)} day
-                                {calculateDays(booking.pickupDate, booking.returnDate) !== 1 ? "s" : ""}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium text-white">${booking.totalAmount}</TableCell>
-                          <TableCell>{getStatusBadge(String(booking.status))}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleViewBooking(booking)}
-                                className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleEditBooking(booking)}
-                                className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteBooking(booking.id)}
-                                className="bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {filteredBookings.map((booking) => {
+                        const isPending = String(booking.status).toLowerCase() === "pending"
+                        return (
+                          <TableRow key={booking.id} className="border-white/10 hover:bg-white/5">
+                            <TableCell>
+                              <div>
+                                <p className="font-medium text-white">{booking.bookingRef}</p>
+                                <p className="text-sm text-white/70">
+                                  {format(new Date(booking.createdAt), "MMM dd, yyyy")}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium text-white">{booking.customerName}</p>
+                                <p className="text-sm text-white/70">{booking.customerEmail}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <p className="font-medium text-white">{booking.vehicleName}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-white">{booking.vehiclePlate || "-"}</p>
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">
+                                <p className="text-white">
+                                  {format(new Date(booking.pickupDate), "MMM dd")} -{" "}
+                                  {format(new Date(booking.returnDate), "MMM dd")}
+                                </p>
+                                <p className="text-white/70">
+                                  {calculateDays(booking.pickupDate, booking.returnDate)} day
+                                  {calculateDays(booking.pickupDate, booking.returnDate) !== 1 ? "s" : ""}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-medium text-white">${booking.totalAmount}</TableCell>
+                            <TableCell>{getStatusBadge(String(booking.status))}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center space-x-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewBooking(booking)}
+                                  className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditBooking(booking)}
+                                  className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteBooking(booking.id)}
+                                  className="bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+
+                                {isPending && (
+                                  <ConfirmBookingButton
+                                    id={booking.id}
+                                    onDone={() => markConfirmed(booking.id)}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -544,7 +564,7 @@ function BookingManagementContent() {
             </Card>
           </div>
 
-          {/* View Dialog */}
+          {/* View dialog */}
           <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
             <DialogContent
               forceMount
@@ -647,7 +667,7 @@ function BookingManagementContent() {
             </DialogContent>
           </Dialog>
 
-          {/* Edit Dialog (local state only for now) */}
+          {/* Edit dialog */}
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             <DialogContent
               forceMount
