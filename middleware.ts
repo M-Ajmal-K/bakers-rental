@@ -2,35 +2,42 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-/**
- * We only gate client pages under /admin. API routes are not matched here.
- * Exclude the login page itself from protection.
- */
 export const config = {
-  // Match /admin and everything under it
   matcher: ["/admin/:path*"],
 };
 
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+const COOKIE_NAME = "admin_session";
 
-  // Always allow the login page and its subpaths (e.g. /admin/login)
+export function middleware(req: NextRequest) {
+  const { pathname, searchParams } = req.nextUrl;
+
+  // Allow the login page itself
   if (pathname === "/admin/login" || pathname.startsWith("/admin/login/")) {
-    return NextResponse.next();
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "no-store");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return res;
   }
 
-  // ✅ TRUST THE PRESENCE OF THE SESSION COOKIE
-  // Do not rely on env token here (Edge/env differences caused the loop).
-  const hasSession = !!req.cookies.get("admin_session")?.value;
+  // Presence-only check (token compare handled in /api/admin/session + client guard)
+  const hasSession = !!req.cookies.get(COOKIE_NAME)?.value;
 
   if (!hasSession) {
     const url = req.nextUrl.clone();
     url.pathname = "/admin/login";
-    // Optionally carry a return-to param
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    // Preserve existing query (minus next) and add return-to param
+    url.searchParams.delete("next");
+    url.searchParams.set("next", pathname + (searchParams.size ? `?${searchParams.toString()}` : ""));
+    const res = NextResponse.redirect(url);
+    res.headers.set("Cache-Control", "no-store");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return res;
   }
 
-  // Auth cookie present → allow
-  return NextResponse.next();
+  // Auth cookie present → proceed with anti-cache / noindex headers
+  const res = NextResponse.next();
+  res.headers.set("Cache-Control", "no-store");
+  res.headers.set("Pragma", "no-cache");
+  res.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return res;
 }

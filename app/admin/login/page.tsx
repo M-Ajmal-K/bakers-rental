@@ -1,77 +1,104 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Car, Lock, User, Shield } from "lucide-react"
-import Link from "next/link"
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Car, Lock, User, Shield } from "lucide-react";
 
 export default function AdminLoginPage() {
-  const [credentials, setCredentials] = useState({
-    username: "",
-    password: "",
-  })
-  const [error, setError] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [isMounted, setIsMounted] = useState(false)
-  const router = useRouter()
+  const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  useEffect(() => {
-    setIsMounted(true)
-  }, [])
+  const nextParam = searchParams.get("next");
+  const safeNext =
+    nextParam && nextParam.startsWith("/admin")
+      ? nextParam
+      : "/admin/dashboard";
 
+  // Mount flag (for animation + SSR hydration safety)
   useEffect(() => {
-    if (!isMounted) return
-    const handleVisibility = () => {
-      const elements = document.querySelectorAll(".fade-in-up")
-      elements.forEach((el) => {
-        const rect = el.getBoundingClientRect()
-        if (rect.top < window.innerHeight - 100) {
-          el.classList.add("animate")
+    setIsMounted(true);
+  }, []);
+
+  // If already authenticated, bounce straight to dashboard (or ?next=)
+  useEffect(() => {
+    if (!isMounted) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/session", {
+          method: "GET",
+          credentials: "include",
+          headers: { "Cache-Control": "no-store" },
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && j?.authed) {
+          router.replace(safeNext);
         }
-      })
-    }
-    handleVisibility()
-  }, [isMounted])
+      } catch {
+        // ignore – just let the user log in
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isMounted, router, safeNext]);
+
+  // Entrance animation setup
+  useEffect(() => {
+    if (!isMounted) return;
+    const handleVisibility = () => {
+      document.querySelectorAll(".fade-in-up").forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight - 100) {
+          el.classList.add("animate");
+        }
+      });
+    };
+    handleVisibility();
+  }, [isMounted]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError("")
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
 
     try {
-      // Only the password matters for the server auth.
       const res = await fetch("/api/admin/session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // ensure cookie is set/kept
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        credentials: "include", // set the cookie
         body: JSON.stringify({ password: credentials.password }),
-      })
+      });
 
-      const data = await res.json().catch(() => ({}))
-
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) {
-        setError(String(data?.error || "Invalid username or password"))
-        return
+        setError(String(data?.error || "Invalid username or password"));
+        return;
       }
 
-      // we’re authenticated (cookie set). Go to admin dashboard.
-      router.replace("/admin/dashboard")
+      // Auth OK → go to ?next= or dashboard
+      router.replace(safeNext);
     } catch (err) {
-      console.error("Login error:", err)
-      setError("An error occurred during login. Please try again.")
+      console.error("Login error:", err);
+      setError("An error occurred during login. Please try again.");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
-  if (!isMounted) return null
+  if (!isMounted) return null;
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -190,12 +217,15 @@ export default function AdminLoginPage() {
                   </Button>
                 </form>
 
-                <div className="text-center pt-4">
-                  <div className="glass-effect-dark p-4 rounded-lg">
-                    <p className="text-white/80 text-sm font-medium mb-2">Demo Credentials</p>
-                    <p className="text-white text-sm font-mono">admin / password123</p>
+                {/* Show demo credentials only in development builds */}
+                {process.env.NODE_ENV !== "production" && (
+                  <div className="text-center pt-4">
+                    <div className="glass-effect-dark p-4 rounded-lg">
+                      <p className="text-white/80 text-sm font-medium mb-2">Demo Credentials</p>
+                      <p className="text-white text-sm font-mono">admin / password123</p>
+                    </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -208,5 +238,5 @@ export default function AdminLoginPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

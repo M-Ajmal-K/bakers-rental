@@ -38,6 +38,12 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+  if (process.env.NODE_ENV === "production" && !token) {
+    return NextResponse.json(
+      { ok: false, error: "Server misconfigured: ADMIN_SESSION_TOKEN missing" },
+      { status: 500 }
+    );
+  }
 
   let supplied = "";
   try {
@@ -46,13 +52,6 @@ export async function POST(req: Request) {
   } catch {
     // ignore
   }
-
-  // Debug without leaking secrets
-  console.log(
-    "[admin/session POST] supplied.len=%d expected.len=%d",
-    supplied.length,
-    pw.length
-  );
 
   if (!safeCompare(supplied, pw)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -74,9 +73,11 @@ export async function POST(req: Request) {
 
 export async function GET() {
   const { token } = getSecrets();
-  const jar = await cookies(); // read-only jar
+  const jar = await cookies(); // read-only jar (await needed in your env)
   const val = jar.get(COOKIE_NAME)?.value ?? "";
-  const authed = !!token && val === token;
+
+  // Use constant-time compare too
+  const authed = !!token && safeCompare(val, token);
   return NextResponse.json({ ok: true, authed });
 }
 
