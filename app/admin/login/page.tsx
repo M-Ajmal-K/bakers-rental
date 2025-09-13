@@ -216,16 +216,6 @@ export default function AdminLoginPage() {
                     {isLoading ? "Signing in..." : "Access Dashboard"}
                   </Button>
                 </form>
-
-                {/* Show demo credentials only in development builds */}
-                {process.env.NODE_ENV !== "production" && (
-                  <div className="text-center pt-4">
-                    <div className="glass-effect-dark p-4 rounded-lg">
-                      <p className="text-white/80 text-sm font-medium mb-2">Demo Credentials</p>
-                      <p className="text-white text-sm font-mono">admin / password123</p>
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </div>
