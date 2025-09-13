@@ -61,8 +61,8 @@ export default function AdminLoginPage() {
         return
       }
 
-      // we’re authenticated (cookie set). Go to dashboard.
-      router.push("/admin/dashboard")
+      // we’re authenticated (cookie set). Go to admin dashboard.
+      router.replace("/admin/dashboard")
     } catch (err) {
       console.error("Login error:", err)
       setError("An error occurred during login. Please try again.")

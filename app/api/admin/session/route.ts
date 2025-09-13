@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
 export async function GET() {
   const { token } = getSecrets();
-  const jar = cookies(); // read-only jar
+  const jar = await cookies(); // read-only jar
   const val = jar.get(COOKIE_NAME)?.value ?? "";
   const authed = !!token && val === token;
   return NextResponse.json({ ok: true, authed });

@@ -4,13 +4,14 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { AdminAuthGuard } from "@/components/admin-auth-guard"
+// Removed AdminAuthGuard — middleware + cookie check now handle protection
 import { Car, Calendar, Settings, LogOut, BarChart3, TrendingUp, Shield } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 
 function DashboardContent() {
   const [adminUser, setAdminUser] = useState("")
+  const [authLoading, setAuthLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState({ vehicles: 0, bookings: 0, revenue: 0 })
   const router = useRouter()
@@ -21,10 +22,37 @@ function DashboardContent() {
     maximumFractionDigits: 2,
   })
 
+  // ✅ Verify cookie session with the server; redirect to login if missing/invalid
   useEffect(() => {
-    const user = localStorage.getItem("adminUser")
-    if (user) setAdminUser(user)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/admin/session", {
+          method: "GET",
+          credentials: "include",
+          headers: { "Cache-Control": "no-store" },
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data?.authed) {
+          if (!cancelled) router.replace("/admin/login")
+          return
+        }
+        // Optional label for the welcome chip; keep your local value if set
+        const name = localStorage.getItem("adminUser") || "Admin"
+        if (!cancelled) {
+          setAdminUser(name)
+          setAuthLoading(false)
+        }
+      } catch {
+        if (!cancelled) router.replace("/admin/login")
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
+  useEffect(() => {
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up")
       elements.forEach((el) => {
@@ -40,30 +68,35 @@ function DashboardContent() {
     return () => window.removeEventListener("scroll", handleVisibility)
   }, [])
 
-  const handleLogout = () => {
-    localStorage.removeItem("adminAuth")
-    localStorage.removeItem("adminUser")
-    router.push("/admin/login")
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/session", { method: "DELETE", credentials: "include" })
+    } catch {
+      // ignore
+    } finally {
+      // Clean any old local flags (harmless if absent)
+      localStorage.removeItem("adminAuth")
+      localStorage.removeItem("adminUser")
+      router.replace("/admin/login")
+    }
   }
 
   // Load live metrics
   useEffect(() => {
+    let cancelled = false
     const load = async () => {
       try {
-        // Vehicles count
         const { count: vehicleCount, error: vErr } = await supabase
           .from("vehicles")
           .select("*", { count: "exact", head: true })
         if (vErr) throw vErr
 
-        // Confirmed bookings count
         const { count: bookingCount, error: bErr } = await supabase
           .from("bookings")
           .select("*", { count: "exact", head: true })
           .eq("status", "confirmed")
         if (bErr) throw bErr
 
-        // Revenue (sum total_price for confirmed bookings)
         const { data: revRows, error: rErr } = await supabase
           .from("bookings")
           .select("total_price")
@@ -75,18 +108,23 @@ function DashboardContent() {
           return sum + (Number.isFinite(v) ? v : 0)
         }, 0)
 
-        setMetrics({
-          vehicles: vehicleCount || 0,
-          bookings: bookingCount || 0,
-          revenue,
-        })
+        if (!cancelled) {
+          setMetrics({
+            vehicles: vehicleCount || 0,
+            bookings: bookingCount || 0,
+            revenue,
+          })
+        }
       } catch (err) {
         console.error("[AdminDashboard] metrics error:", err)
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Aurora Neon palette for icon tiles
@@ -116,6 +154,18 @@ function DashboardContent() {
       hint: "From confirmed bookings",
     },
   ]
+
+  // While verifying auth, keep your branded loading view
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white mx-auto"></div>
+          <p className="text-cyan-100/80 mt-3">Preparing your dashboard…</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden">
@@ -327,9 +377,6 @@ function DashboardContent() {
 }
 
 export default function AdminDashboardPage() {
-  return (
-    <AdminAuthGuard>
-      <DashboardContent />
-    </AdminAuthGuard>
-  )
+  // No AdminAuthGuard wrapper; route is protected by middleware + in-page cookie check
+  return <DashboardContent />
 }

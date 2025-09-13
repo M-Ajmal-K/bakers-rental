@@ -22,27 +22,44 @@ export function AdminAuthGuard({ children }: AdminAuthGuardProps) {
   useEffect(() => {
     if (!isMounted) return
 
-    const checkAuth = () => {
-      try {
-        if (typeof window !== "undefined" && window.localStorage) {
-          const authStatus = localStorage.getItem("adminAuth") === "true"
-          setIsAuthenticated(authStatus)
+    let cancelled = false
 
-          if (!authStatus) {
-            router.push("/admin/login")
-          }
+    const checkAuth = async () => {
+      try {
+        // Ask server if we're authenticated (cookie-based)
+        const res = await fetch("/api/admin/session", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        })
+
+        const data = await res.json().catch(() => ({}))
+        const authed = !!data?.authed
+
+        if (cancelled) return
+        setIsAuthenticated(authed)
+
+        if (!authed) {
+          // Not authenticated → go to login
+          router.replace("/admin/login")
         } else {
-          setIsAuthenticated(false)
-          router.push("/admin/login")
+          // Optional: keep this for any UI pieces reading localStorage
+          try {
+            localStorage.setItem("adminAuth", "true")
+          } catch {}
         }
       } catch (error) {
         console.error("Auth check error:", error)
+        if (cancelled) return
         setIsAuthenticated(false)
-        router.push("/admin/login")
+        router.replace("/admin/login")
       }
     }
 
     checkAuth()
+    return () => {
+      cancelled = true
+    }
   }, [router, isMounted])
 
   if (!isMounted || isAuthenticated === null) {
@@ -60,7 +77,8 @@ export function AdminAuthGuard({ children }: AdminAuthGuardProps) {
   }
 
   if (!isAuthenticated) {
-    return null // Will redirect to login
+    // We already redirected; render nothing to avoid flash
+    return null
   }
 
   return <>{children}</>
