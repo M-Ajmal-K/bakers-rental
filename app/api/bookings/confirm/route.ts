@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
+import { createHash, timingSafeEqual } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* ----------------------------- Helpers / Env ----------------------------- */
 function getEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const adminToken = process.env.ADMIN_SESSION_TOKEN;
   if (!url || !serviceKey) {
     throw new Error("Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
   }
-  return { url, serviceKey };
+  if (!adminToken) {
+    throw new Error("Missing ADMIN_SESSION_TOKEN env var.");
+  }
+  return { url, serviceKey, adminToken };
 }
 
 function adminClient() {
@@ -20,18 +27,34 @@ function adminClient() {
   });
 }
 
+// Constant-time compare using SHA-256 digests
+function safeEquals(a: string, b: string) {
+  const da = createHash("sha256").update(a || "").digest();
+  const db = createHash("sha256").update(b || "").digest();
+  return timingSafeEqual(da, db);
+}
+
+/* -------------------------------- Route --------------------------------- */
 export async function POST(req: Request) {
   try {
+    // 0) Admin auth via cookie
+    const { adminToken } = getEnv();
+    const jar = await cookies(); // <-- FIX: await cookies()
+    const cookie = jar.get("admin_session")?.value || "";
+    if (!cookie || !safeEquals(cookie, adminToken)) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    // 1) Input
     const body = await req.json().catch(() => ({}));
     const { id, code } = body || {};
-
     if (!id && !code) {
-      return new NextResponse("Provide booking 'id' or 'code'.", { status: 400 });
+      return NextResponse.json({ ok: false, error: "Provide booking 'id' or 'code'." }, { status: 400 });
     }
 
     const supabase = adminClient();
 
-    // 1) find the booking
+    // 2) Find booking by id or code
     const filter = id ? { id } : { code };
     const { data: rows, error: findErr } = await supabase
       .from("bookings")
@@ -39,43 +62,48 @@ export async function POST(req: Request) {
       .match(filter)
       .limit(1);
 
-    if (findErr) return new NextResponse(findErr.message, { status: 400 });
+    if (findErr) return NextResponse.json({ ok: false, error: findErr.message }, { status: 400 });
     const booking = rows?.[0];
-    if (!booking) return new NextResponse("Booking not found.", { status: 404 });
+    if (!booking) return NextResponse.json({ ok: false, error: "Booking not found." }, { status: 404 });
 
-    // 2) already confirmed?
-    if (booking.status === "CONFIRMED") {
+    const currentStatus = String(booking.status || "").toLowerCase();
+
+    // 3) Already confirmed?
+    if (currentStatus === "confirmed") {
       return NextResponse.json({ ok: true, booking, message: "Already confirmed." });
     }
 
-    // 3) ensure no overlap with other confirmed bookings
+    // 4) Conflict check with other confirmed bookings on same vehicle
     const { data: conflicts, error: confErr } = await supabase
       .from("bookings")
       .select("id")
       .eq("vehicle_id", booking.vehicle_id)
-      .eq("status", "CONFIRMED")
+      .eq("status", "confirmed")
       .lte("start_date", booking.end_date)
       .gte("end_date", booking.start_date)
       .neq("id", booking.id)
       .limit(1);
 
-    if (confErr) return new NextResponse(confErr.message, { status: 400 });
+    if (confErr) return NextResponse.json({ ok: false, error: confErr.message }, { status: 400 });
     if (conflicts && conflicts.length > 0) {
-      return new NextResponse("Cannot confirm: dates overlap an existing confirmed booking.", { status: 409 });
+      return NextResponse.json(
+        { ok: false, error: "Cannot confirm: dates overlap an existing confirmed booking." },
+        { status: 409 }
+      );
     }
 
-    // 4) update to CONFIRMED
+    // 5) Update to confirmed (lowercase for consistency)
     const { data: updated, error: updErr } = await supabase
       .from("bookings")
-      .update({ status: "CONFIRMED" })
+      .update({ status: "confirmed" })
       .match({ id: booking.id })
       .select()
       .limit(1);
 
-    if (updErr) return new NextResponse(updErr.message, { status: 400 });
+    if (updErr) return NextResponse.json({ ok: false, error: updErr.message }, { status: 400 });
 
     return NextResponse.json({ ok: true, booking: updated?.[0] });
   } catch (e: any) {
-    return new NextResponse(e?.message || "Server error", { status: 500 });
+    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 });
   }
 }

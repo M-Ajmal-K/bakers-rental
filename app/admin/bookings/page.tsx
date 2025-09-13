@@ -1,29 +1,28 @@
-"use client"
+"use client";
 
-import { useEffect, useState, memo } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { format } from "date-fns"
+import { useEffect, useState, memo } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { format } from "date-fns";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react"
-// (supabase import left in place, even though we don't use it now — harmless)
-import { supabase } from "@/lib/supabaseClient"
-import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton"
+import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react";
+import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton";
+import { AdminAuthGuard } from "@/components/admin-auth-guard";
 
 /* -------------------------------------------------------------------------- */
 /*                             Types / Status Map                              */
 /* -------------------------------------------------------------------------- */
 
-const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const
+const bookingStatuses = ["all", "pending", "confirmed", "completed", "cancelled"] as const;
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30",
@@ -31,27 +30,27 @@ const statusColors: Record<string, string> = {
   completed: "bg-blue-500/15 text-blue-200 ring-1 ring-blue-400/30",
   cancelled: "bg-red-500/15 text-red-200 ring-1 ring-red-400/30",
   active: "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-400/30",
-}
+};
 
-type BookingStatus = typeof bookingStatuses[number]
+type BookingStatus = typeof bookingStatuses[number];
 
 interface Booking {
-  id: string
-  bookingRef: string
-  customerName: string
-  customerEmail: string
-  customerPhone: string
-  vehicleId: string
-  vehicleName: string
-  vehiclePlate: string
-  pickupDate: string
-  returnDate: string
-  pickupLocation: string
-  dropoffLocation: string
-  totalAmount: number
-  status: BookingStatus | string
-  createdAt: string
-  notes: string
+  id: string;
+  bookingRef: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  vehicleId: string;
+  vehicleName: string;
+  vehiclePlate: string;
+  pickupDate: string;
+  returnDate: string;
+  pickupLocation: string;
+  dropoffLocation: string;
+  totalAmount: number;
+  status: BookingStatus | string;
+  createdAt: string;
+  notes: string;
 }
 
 /* ---------------- Mobile card for bookings (UI unchanged) ----------------- */
@@ -64,15 +63,15 @@ const MobileBookingCard = memo(function MobileBookingCard({
   getStatusBadge,
   calculateDays,
 }: {
-  booking: Booking
-  onView: (b: Booking) => void
-  onEdit: (b: Booking) => void
-  onDelete: (id: string) => void | Promise<void> // widened to allow async
-  onConfirmed: (id: string) => void
-  getStatusBadge: (s: string) => JSX.Element
-  calculateDays: (a: string, b: string) => number
+  booking: Booking;
+  onView: (b: Booking) => void;
+  onEdit: (b: Booking) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onConfirmed: (id: string) => void;
+  getStatusBadge: (s: string) => JSX.Element;
+  calculateDays: (a: string, b: string) => number;
 }) {
-  const isPending = String(booking.status).toLowerCase() === "pending"
+  const isPending = String(booking.status).toLowerCase() === "pending";
 
   return (
     <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10">
@@ -145,70 +144,74 @@ const MobileBookingCard = memo(function MobileBookingCard({
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
           </Button>
 
-          {isPending && (
-            <ConfirmBookingButton
-              id={booking.id}
-              onDone={() => onConfirmed(booking.id)}
-            />
-          )}
+          {isPending && <ConfirmBookingButton id={booking.id} onDone={() => onConfirmed(booking.id)} />}
         </div>
       </CardContent>
     </Card>
-  )
-})
+  );
+});
 
 /* -------------------------------------------------------------------------- */
 /*                           Main content (admin UI)                           */
 /* -------------------------------------------------------------------------- */
 
 function BookingManagementContent() {
-  const router = useRouter()
+  const router = useRouter();
 
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [filteredBookings, setFilteredBookings] = useState<Booking[]>([])
-  const [statusFilter, setStatusFilter] = useState<BookingStatus | "all">("all")
-  const [searchTerm, setSearchTerm] = useState("")
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
-  const [editFormData, setEditFormData] = useState({ status: "", notes: "" })
-  const [loading, setLoading] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [filteredBookings, setFilteredBookings] = useState<Booking[]>([]);
+  const [statusFilter, setStatusFilter] = useState<BookingStatus | "all">("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [editFormData, setEditFormData] = useState({ status: "", notes: "" });
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const activate = () => {
-      document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"))
-    }
-    activate()
-    window.addEventListener("scroll", activate)
-    return () => window.removeEventListener("scroll", activate)
-  }, [])
+      document.querySelectorAll<HTMLElement>(".fade-in-up").forEach((el) => el.classList.add("animate"));
+    };
+    activate();
+    window.addEventListener("scroll", activate);
+    return () => window.removeEventListener("scroll", activate);
+  }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem("adminAuth")
-    localStorage.removeItem("adminUser")
-    router.push("/admin/login")
-  }
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/session", { method: "DELETE", credentials: "include" });
+    } finally {
+      router.replace("/admin/login");
+    }
+  };
 
   /* --------------------------- Fetch bookings via API --------------------------- */
   useEffect(() => {
+    const ac = new AbortController();
+
     const fetchData = async () => {
-      setLoading(true)
-      setLoadError(null)
+      setLoading(true);
+      setLoadError(null);
       try {
-        const res = await fetch("/api/admin/bookings/list", { cache: "no-store" })
+        const res = await fetch("/api/admin/bookings/list", {
+          cache: "no-store",
+          credentials: "include",
+          signal: ac.signal,
+          headers: { "Cache-Control": "no-store" },
+        });
         if (!res.ok) {
-          const msg = await res.text()
-          throw new Error(msg || "Failed to fetch bookings")
+          const msg = await res.text();
+          throw new Error(msg || "Failed to fetch bookings");
         }
-        const json = await res.json()
-        const rows = Array.isArray(json.items) ? json.items : []
+        const json = await res.json();
+        const rows = Array.isArray(json.items) ? json.items : [];
 
         const mapped: Booking[] = rows.map((r: any) => {
-          const id: string = r.id
-          const created = r.created_at || new Date().toISOString()
-          const ref = `BK-${format(new Date(created), "yyyy")}-${String(id).slice(0, 6).toUpperCase()}`
-          const veh = r._vehicle || { title: "(Unknown Vehicle)", registration_number: "" }
+          const id: string = r.id;
+          const created = r.created_at || new Date().toISOString();
+          const ref = `BK-${format(new Date(created), "yyyy")}-${String(id).slice(0, 6).toUpperCase()}`;
+          const veh = r._vehicle || { title: "(Unknown Vehicle)", registration_number: "" };
           return {
             id,
             bookingRef: ref,
@@ -226,105 +229,107 @@ function BookingManagementContent() {
             status: String(r.status ?? "pending").toLowerCase(),
             createdAt: created,
             notes: r.notes ?? "",
-          }
-        })
+          };
+        });
 
-        setBookings(mapped)
-        setFilteredBookings(mapped)
+        setBookings(mapped);
+        setFilteredBookings(mapped);
       } catch (err: any) {
-        console.error("[Admin/Bookings] list API error:", err)
-        setLoadError(err?.message || "Failed to load bookings.")
-        setBookings([])
-        setFilteredBookings([])
+        if (err?.name === "AbortError") return;
+        console.error("[Admin/Bookings] list API error:", err);
+        setLoadError(err?.message || "Failed to load bookings.");
+        setBookings([]);
+        setFilteredBookings([]);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    fetchData()
-  }, [])
+    fetchData();
+    return () => ac.abort();
+  }, []);
 
   // Filter
   useEffect(() => {
-    let filtered = bookings
-    if (statusFilter !== "all") filtered = filtered.filter((b) => String(b.status) === statusFilter)
+    let filtered = bookings;
+    if (statusFilter !== "all") filtered = filtered.filter((b) => String(b.status) === statusFilter);
     if (searchTerm) {
-      const q = searchTerm.toLowerCase()
+      const q = searchTerm.toLowerCase();
       filtered = filtered.filter(
         (b) =>
           b.customerName.toLowerCase().includes(q) ||
           b.bookingRef.toLowerCase().includes(q) ||
           b.vehicleName.toLowerCase().includes(q) ||
           b.vehiclePlate.toLowerCase().includes(q),
-      )
+      );
     }
-    setFilteredBookings(filtered)
-  }, [bookings, statusFilter, searchTerm])
+    setFilteredBookings(filtered);
+  }, [bookings, statusFilter, searchTerm]);
 
   const handleViewBooking = (booking: Booking) => {
-    setSelectedBooking(booking)
-    setIsViewDialogOpen(true)
-  }
+    setSelectedBooking(booking);
+    setIsViewDialogOpen(true);
+  };
 
   const handleEditBooking = (booking: Booking) => {
-    setSelectedBooking(booking)
-    setEditFormData({ status: String(booking.status), notes: booking.notes })
-    setIsEditDialogOpen(true)
-  }
+    setSelectedBooking(booking);
+    setEditFormData({ status: String(booking.status), notes: booking.notes });
+    setIsEditDialogOpen(true);
+  };
 
   // Local-only (MVP)
   const handleUpdateBooking = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedBooking) return
-    const updated = { ...selectedBooking, status: editFormData.status, notes: editFormData.notes }
-    setBookings((prev) => prev.map((b) => (b.id === selectedBooking.id ? updated : b)))
-    setIsEditDialogOpen(false)
-    setSelectedBooking(null)
-  }
+    e.preventDefault();
+    if (!selectedBooking) return;
+    const updated = { ...selectedBooking, status: editFormData.status, notes: editFormData.notes };
+    setBookings((prev) => prev.map((b) => (b.id === selectedBooking.id ? updated : b)));
+    setIsEditDialogOpen(false);
+    setSelectedBooking(null);
+  };
 
-  // UPDATED: real delete via API (keeps existing Delete button)
+  // Real delete via API (keeps existing Delete button)
   const handleDeleteBooking = async (id: string) => {
-    const sure = confirm("Are you sure you want to delete this booking?")
-    if (!sure) return
+    const sure = confirm("Are you sure you want to delete this booking?");
+    if (!sure) return;
     try {
       const res = await fetch("/api/admin/bookings/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ id }),
-      })
+      });
       if (!res.ok) {
-        const msg = await res.text()
-        alert(msg || "Failed to delete booking.")
-        return
+        const msg = await res.text();
+        alert(msg || "Failed to delete booking.");
+        return;
       }
-      // Remove from UI on success
-      setBookings((prev) => prev.filter((b) => b.id !== id))
+      setBookings((prev) => prev.filter((b) => b.id !== id));
     } catch (err: any) {
-      console.error("[Admin/Bookings] delete error:", err)
-      alert(err?.message || "Failed to delete booking.")
+      console.error("[Admin/Bookings] delete error:", err);
+      alert(err?.message || "Failed to delete booking.");
     }
-  }
+  };
 
   const getStatusBadge = (status: string) => {
-    const colorClass = statusColors[status] || "bg-white/10 text-white ring-1 ring-white/15"
+    const colorClass = statusColors[status] || "bg-white/10 text-white ring-1 ring-white/15";
     return (
       <Badge className={`${colorClass} capitalize`} variant="secondary">
         {status}
       </Badge>
-    )
-  }
+    );
+  };
 
   const calculateDays = (pickupDate: string, returnDate: string) => {
-    const pickup = new Date(pickupDate)
-    const ret = new Date(returnDate)
-    const diff = Math.abs(ret.getTime() - pickup.getTime())
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
-    return days || 1
-  }
+    const pickup = new Date(pickupDate);
+    const ret = new Date(returnDate);
+    const diff = Math.abs(ret.getTime() - pickup.getTime());
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return days || 1;
+  };
 
   const markConfirmed = (id: string) => {
-    setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: "confirmed" } : b)))
-  }
+    setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: "confirmed" } : b)));
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden">
@@ -474,7 +479,7 @@ function BookingManagementContent() {
                     </TableHeader>
                     <TableBody>
                       {filteredBookings.map((booking) => {
-                        const isPending = String(booking.status).toLowerCase() === "pending"
+                        const isPending = String(booking.status).toLowerCase() === "pending";
                         return (
                           <TableRow key={booking.id} className="border-white/10 hover:bg-white/5">
                             <TableCell>
@@ -539,15 +544,12 @@ function BookingManagementContent() {
                                 </Button>
 
                                 {isPending && (
-                                  <ConfirmBookingButton
-                                    id={booking.id}
-                                    onDone={() => markConfirmed(booking.id)}
-                                  />
+                                  <ConfirmBookingButton id={booking.id} onDone={() => markConfirmed(booking.id)} />
                                 )}
                               </div>
                             </TableCell>
                           </TableRow>
-                        )
+                        );
                       })}
                     </TableBody>
                   </Table>
@@ -692,10 +694,18 @@ function BookingManagementContent() {
                         <SelectValue placeholder="Choose status" />
                       </SelectTrigger>
                       <SelectContent className="bg-slate-900/90 backdrop-blur-xl border-white/10 text-white">
-                        <SelectItem value="pending" className="hover:bg-white/10">Pending</SelectItem>
-                        <SelectItem value="confirmed" className="hover:bg-white/10">Confirmed</SelectItem>
-                        <SelectItem value="completed" className="hover:bg-white/10">Completed</SelectItem>
-                        <SelectItem value="cancelled" className="hover:bg-white/10">Cancelled</SelectItem>
+                        <SelectItem value="pending" className="hover:bg-white/10">
+                          Pending
+                        </SelectItem>
+                        <SelectItem value="confirmed" className="hover:bg-white/10">
+                          Confirmed
+                        </SelectItem>
+                        <SelectItem value="completed" className="hover:bg-white/10">
+                          Completed
+                        </SelectItem>
+                        <SelectItem value="cancelled" className="hover:bg-white/10">
+                          Cancelled
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -724,8 +734,8 @@ function BookingManagementContent() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        setIsEditDialogOpen(false)
-                        setSelectedBooking(null)
+                        setIsEditDialogOpen(false);
+                        setSelectedBooking(null);
                       }}
                       className="h-10 md:h-11 bg-white/5 hover:bg-white/10 border-white/10 text-white"
                     >
@@ -739,30 +749,14 @@ function BookingManagementContent() {
         </div>
       </section>
     </div>
-  )
+  );
 }
 
-/* -------- Default export with built-in auth check (replaces AdminAuthGuard) -------- */
+/* -------- Default export: wrap with cookie-aware AdminAuthGuard -------- */
 export default function BookingManagementPage() {
-  const router = useRouter()
-  const [ready, setReady] = useState(false)
-  const [authed, setAuthed] = useState(false)
-
-  useEffect(() => {
-    const ok = typeof window !== "undefined" && localStorage.getItem("adminAuth") === "true"
-    setAuthed(ok)
-    setReady(true)
-    if (!ok) router.replace("/admin/login")
-  }, [router])
-
-  if (!ready) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">
-        Checking admin session…
-      </div>
-    )
-  }
-  if (!authed) return null
-
-  return <BookingManagementContent />
+  return (
+    <AdminAuthGuard>
+      <BookingManagementContent />
+    </AdminAuthGuard>
+  );
 }

@@ -1,85 +1,72 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Car } from "lucide-react"
+import type React from "react";
+import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { Car } from "lucide-react";
 
 interface AdminAuthGuardProps {
-  children: React.ReactNode
+  children: React.ReactNode;
 }
 
 export function AdminAuthGuard({ children }: AdminAuthGuardProps) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-  const [isMounted, setIsMounted] = useState(false)
-  const router = useRouter()
+  const [ready, setReady] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    setIsMounted(true)
-  }, [])
+    let cancelled = false;
+    const ac = new AbortController();
 
-  useEffect(() => {
-    if (!isMounted) return
-
-    let cancelled = false
-
-    const checkAuth = async () => {
+    (async () => {
       try {
-        // Ask server if we're authenticated (cookie-based)
         const res = await fetch("/api/admin/session", {
           method: "GET",
           credentials: "include",
-          cache: "no-store",
-        })
+          headers: { "Cache-Control": "no-store" },
+          signal: ac.signal,
+        });
 
-        const data = await res.json().catch(() => ({}))
-        const authed = !!data?.authed
+        const data = await res.json().catch(() => ({}));
 
-        if (cancelled) return
-        setIsAuthenticated(authed)
+        if (cancelled) return;
 
-        if (!authed) {
-          // Not authenticated → go to login
-          router.replace("/admin/login")
+        if (res.ok && data?.authed) {
+          setAuthed(true);
+          setReady(true);
         } else {
-          // Optional: keep this for any UI pieces reading localStorage
-          try {
-            localStorage.setItem("adminAuth", "true")
-          } catch {}
+          const next = encodeURIComponent(pathname || "/admin/dashboard");
+          router.replace(`/admin/login?next=${next}`);
         }
-      } catch (error) {
-        console.error("Auth check error:", error)
-        if (cancelled) return
-        setIsAuthenticated(false)
-        router.replace("/admin/login")
+      } catch {
+        if (!cancelled) {
+          const next = encodeURIComponent(pathname || "/admin/dashboard");
+          router.replace(`/admin/login?next=${next}`);
+        }
       }
-    }
+    })();
 
-    checkAuth()
     return () => {
-      cancelled = true
-    }
-  }, [router, isMounted])
+      cancelled = true;
+      ac.abort();
+    };
+  }, [router, pathname]);
 
-  if (!isMounted || isAuthenticated === null) {
+  // Loading / auth check screen (prevents content flash)
+  if (!ready || !authed) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-accent via-primary to-secondary flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 gradient-primary rounded-2xl flex items-center justify-center mx-auto mb-6 animate-pulse">
             <Car className="h-8 w-8 text-white" />
           </div>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white/80 font-medium">Authenticating...</p>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4" />
+          <p className="text-white/80 font-medium">Authenticating…</p>
         </div>
       </div>
-    )
+    );
   }
 
-  if (!isAuthenticated) {
-    // We already redirected; render nothing to avoid flash
-    return null
-  }
-
-  return <>{children}</>
+  return <>{children}</>;
 }

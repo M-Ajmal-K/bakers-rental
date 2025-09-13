@@ -19,7 +19,7 @@ import { Car, Plus, LogOut, AlertTriangle, Filter } from "lucide-react";
 import VehicleForm from "./VehicleForm";
 import VehicleList from "./VehicleList";
 import { FormState, Vehicle } from "./VehicleTypes";
-import { format } from "date-fns"; // ⬅️ existing
+import { format } from "date-fns";
 
 // Admin filters to mirror customer side
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
@@ -32,10 +32,9 @@ export default function VehicleManagement() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
-  // NEW: admin-side filters
+  // Admin-side filters
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
-  const [availabilityFilter, setAvailabilityFilter] =
-    useState<AvailabilityFilter>("All");
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("All");
   const [showFilters, setShowFilters] = useState(false); // mobile toggle
 
   const [formData, setFormData] = useState<FormState>({
@@ -58,10 +57,12 @@ export default function VehicleManagement() {
 
   /* ---------------- Load vehicles + compute dynamic availability ---------------- */
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
       if (!supabase) return;
 
-      // 1) Load the vehicles as before
+      // 1) Load vehicles
       const { data: vData, error: vErr } = await supabase
         .from("vehicles")
         .select(
@@ -70,13 +71,14 @@ export default function VehicleManagement() {
         )
         .order("created_at", { ascending: false });
 
+      if (cancelled) return;
       if (vErr) {
         console.error("[Vehicles] select error:", vErr);
         return;
       }
       const vehiclesRaw = vData || [];
 
-      // 2) Build an ID list and fetch ACTIVE bookings for TODAY
+      // 2) Fetch bookings that make a vehicle unavailable today
       const ids = vehiclesRaw.map((v: any) => v.id).filter(Boolean);
       let unavailSet = new Set<string>();
 
@@ -90,16 +92,19 @@ export default function VehicleManagement() {
           .lte("start_date", todayLocal)
           .gte("end_date", todayLocal);
 
-        if (bErr) {
-          console.error("[Vehicles] bookings fetch error:", bErr);
-        } else {
-          for (const b of bData || []) {
-            if (b?.vehicle_id) unavailSet.add(String(b.vehicle_id));
+        if (!cancelled) {
+          if (bErr) {
+            console.error("[Vehicles] bookings fetch error:", bErr);
+          } else {
+            for (const b of bData || []) {
+              if (b?.vehicle_id) unavailSet.add(String(b.vehicle_id));
+            }
           }
         }
       }
 
-      // 3) Map to your Vehicle type and override availability if booked today
+      // 3) Map to UI type and override availability if booked today
+      if (cancelled) return;
       const mapped: Vehicle[] =
         vehiclesRaw.map((v: any) => ({
           id: v.id,
@@ -109,7 +114,6 @@ export default function VehicleManagement() {
           year: Number(v.year ?? 0),
           pricePerDay: Number(v.rental_price ?? 0),
           licensePlate: v.registration_number ?? "",
-          // If booked today => force Unavailable; else keep DB flag
           available: Boolean(v.available) && !unavailSet.has(String(v.id)),
           image: v.public_url ?? null,
           imagePath: v.image_path ?? null,
@@ -128,6 +132,9 @@ export default function VehicleManagement() {
     };
 
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* ---------------- Derived: filtered list for admin view ---------------- */
@@ -165,7 +172,13 @@ export default function VehicleManagement() {
     const fd = new FormData();
     fd.append("file", file);
 
-    const res = await fetch("/api/storage/upload", { method: "POST", body: fd });
+    const res = await fetch("/api/storage/upload", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Cache-Control": "no-store" },
+      body: fd,
+    });
     if (!res.ok) {
       let msg = "Upload failed";
       try {
@@ -220,17 +233,20 @@ export default function VehicleManagement() {
           : [],
       };
 
-      const { data, error } = await supabase
-        .from("vehicles")
-        .insert(payload)
-        .select()
-        .single();
-
-      if (error) {
-        console.error("[Vehicles] insert error:", JSON.stringify(error, null, 2));
-        alert(error?.message || "Insert failed, check console for details");
+      // WRITE via server API (service role) to avoid RLS
+      const res = await fetch("/api/admin/vehicles/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok || !json?.ok) {
+        console.error("[Vehicles] insert error:", json);
+        alert(json?.error || "Insert failed, check console for details");
         return;
       }
+      const data = json.vehicle;
 
       const newVehicle: Vehicle = {
         id: data.id,
@@ -240,7 +256,7 @@ export default function VehicleManagement() {
         year: Number(data.year ?? 0),
         pricePerDay: Number(data.rental_price ?? 0),
         licensePlate: data.registration_number ?? "",
-        available: Boolean(data.available), // will be adjusted on next load
+        available: Boolean(data.available),
         image: data.public_url ?? publicUrl ?? null,
         imagePath: data.image_path ?? null,
         category: data.category ?? "",
@@ -318,14 +334,17 @@ export default function VehicleManagement() {
       if (newImagePath) payload.image_path = newImagePath;
       if (newPublicUrl) payload.public_url = newPublicUrl;
 
-      const { error } = await supabase
-        .from("vehicles")
-        .update(payload)
-        .eq("id", editingVehicle.id);
-
-      if (error) {
-        console.error("[Vehicles] update error:", error);
-        alert(error.message);
+      // WRITE via server API (service role)
+      const res = await fetch("/api/admin/vehicles/update", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body: JSON.stringify({ id: editingVehicle.id, ...payload }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok || !json?.ok) {
+        console.error("[Vehicles] update error:", json);
+        alert(json?.error || "Update failed");
         return;
       }
 
@@ -337,7 +356,7 @@ export default function VehicleManagement() {
         year: Number.parseInt(formData.year || "0"),
         pricePerDay: Number(formData.pricePerDay || "0"),
         licensePlate: formData.licensePlate,
-        available: formData.available, // overridden by today's status on next load
+        available: formData.available,
         image: newPublicUrl,
         imagePath: newImagePath ?? editingVehicle.imagePath,
         category: formData.category,
@@ -351,9 +370,7 @@ export default function VehicleManagement() {
           : [],
       };
 
-      setVehicles((prev) =>
-        prev.map((v) => (v.id === editingVehicle.id ? updated : v))
-      );
+      setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)));
       setIsEditDialogOpen(false);
       setEditingVehicle(null);
       resetForm();
@@ -367,12 +384,20 @@ export default function VehicleManagement() {
     const victim = vehicles.find((v) => v.id === id);
     if (!confirm("Are you sure you want to delete this vehicle?")) return;
 
-    const { error } = await supabase.from("vehicles").delete().eq("id", id);
-    if (error) {
-      alert(error.message);
+    // DELETE via server API (service role)
+    const res = await fetch("/api/admin/vehicles/delete", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      body: JSON.stringify({ id }),
+    });
+    const json = await res.json().catch(() => ({} as any));
+    if (!res.ok || !json?.ok) {
+      alert(json?.error || "Delete failed.");
       return;
     }
 
+    // Optional: remove image from storage (kept as-is)
     if (victim?.imagePath) {
       await supabase.storage.from(STORAGE_BUCKET).remove([victim.imagePath]);
     }
@@ -380,11 +405,13 @@ export default function VehicleManagement() {
     setVehicles((prev) => prev.filter((v) => v.id !== id));
   };
 
-  /* ---------------- Logout ---------------- */
-  const handleLogout = () => {
-    localStorage.removeItem("adminAuth");
-    localStorage.removeItem("adminUser");
-    router.push("/admin/login");
+  /* ---------------- Logout (cookie-based) ---------------- */
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/session", { method: "DELETE", credentials: "include" });
+    } finally {
+      router.replace("/admin/login");
+    }
   };
 
   return (
@@ -400,10 +427,7 @@ export default function VehicleManagement() {
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 sm:space-x-4">
-              <Link
-                href="/admin/dashboard"
-                className="flex items-center space-x-2 sm:space-x-3 group"
-              >
+              <Link href="/admin/dashboard" className="flex items-center space-x-2 sm:space-x-3 group">
                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-black/20 group-hover:scale-110 transition-transform duration-300">
                   <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
@@ -411,9 +435,7 @@ export default function VehicleManagement() {
                   <span className="text-xl sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-cyan-100 to-fuchsia-100 bg-clip-text text-transparent">
                     Bakers Rentals
                   </span>
-                  <p className="text-cyan-100/80 text-xs sm:text-sm">
-                    Vehicle Management
-                  </p>
+                  <p className="text-cyan-100/80 text-xs sm:text-sm">Vehicle Management</p>
                 </div>
               </Link>
             </div>
@@ -449,9 +471,7 @@ export default function VehicleManagement() {
               <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-2 sm:mb-4 drop-shadow">
                 Vehicle Fleet Management
               </h1>
-              <p className="text-cyan-100/80 text-sm sm:text-xl">
-                Manage your premium vehicle collection
-              </p>
+              <p className="text-cyan-100/80 text-sm sm:text-xl">Manage your premium vehicle collection</p>
             </div>
 
             <Dialog
@@ -475,15 +495,9 @@ export default function VehicleManagement() {
                 className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
               >
                 <DialogHeader>
-                  <DialogTitle className="text-white text-xl sm:text-2xl">
-                    Add New Vehicle
-                  </DialogTitle>
-                  <DialogDescription
-                    id="add-vehicle-desc"
-                    className="text-cyan-100/80"
-                  >
-                    Upload a photo and fill in the vehicle details. Fields
-                    marked * are required.
+                  <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
+                  <DialogDescription id="add-vehicle-desc" className="text-cyan-100/80">
+                    Upload a photo and fill in the vehicle details. Fields marked * are required.
                   </DialogDescription>
                 </DialogHeader>
                 <VehicleForm
@@ -496,7 +510,7 @@ export default function VehicleManagement() {
             </Dialog>
           </div>
 
-          {/* NEW: Filters (category + availability) */}
+          {/* Filters (category + availability) */}
           <div className="mb-6 sm:mb-8">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -509,13 +523,10 @@ export default function VehicleManagement() {
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                 </Button>
-                <span className="hidden sm:inline text-cyan-100/80 text-sm">
-                  Filter your fleet
-                </span>
+                <span className="hidden sm:inline text-cyan-100/80 text-sm">Filter your fleet</span>
               </div>
               <div className="hidden sm:block bg-white/5 text-white/90 px-3 py-1 rounded-lg text-sm">
-                {filteredVehicles.length} vehicle
-                {filteredVehicles.length !== 1 ? "s" : ""} shown
+                {filteredVehicles.length} vehicle{filteredVehicles.length !== 1 ? "s" : ""} shown
               </div>
             </div>
 
@@ -560,17 +571,16 @@ export default function VehicleManagement() {
             </div>
           </div>
 
-          {/* Vehicle list (wrapped for theme only) */}
+          {/* Vehicle list */}
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.03] backdrop-blur-md">
-            {/* ← filtered here */}
             <VehicleList
-              vehicles={filteredVehicles} 
+              vehicles={filteredVehicles}
               onEdit={openEditDialog}
               onDelete={handleDeleteVehicle}
             />
           </div>
 
-          {/* Edit dialog (theme only) */}
+          {/* Edit dialog */}
           <Dialog
             open={isEditDialogOpen}
             onOpenChange={(o) => {
@@ -586,13 +596,8 @@ export default function VehicleManagement() {
               className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
             >
               <DialogHeader>
-                <DialogTitle className="text-white text-xl sm:text-2xl">
-                  Edit Vehicle
-                </DialogTitle>
-                <DialogDescription
-                  id="edit-vehicle-desc"
-                  className="text-cyan-100/80"
-                >
+                <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
+                <DialogDescription id="edit-vehicle-desc" className="text-cyan-100/80">
                   Update details or upload a new photo for this vehicle.
                 </DialogDescription>
               </DialogHeader>
