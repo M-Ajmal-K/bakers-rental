@@ -21,32 +21,28 @@ function adminClient() {
   });
 }
 
-// NOTE: In Next 15, ctx.params is a Promise for dynamic routes.
-//       Await it before using.
 type Params = { vehicleId: string };
 
-export async function GET(req: Request, ctx: { params: Promise<Params> }) {
-  const { vehicleId } = await ctx.params; // 👈 fix: await params
+export async function GET(req: Request, ctx: { params: Promise<Params> | Params }) {
+  const { vehicleId } = await (ctx.params as Promise<Params>); // works for both Next 14/15
   const supabase = adminClient();
 
   const url = new URL(req.url);
-  // includePending=1 -> also block recent PENDING holds while you wait for receipts
   const includePending = url.searchParams.get("includePending") === "1";
   const pendingHoldHours = Number(url.searchParams.get("pendingHours") || 48);
 
-  // Work with DATE columns in local day
+  // Local-day strings for DATE columns
   const todayLocal = new Date();
   todayLocal.setHours(0, 0, 0, 0);
   const todayStr = todayLocal.toISOString().slice(0, 10); // "YYYY-MM-DD"
-
   const cutoffIso = new Date(Date.now() - pendingHoldHours * 60 * 60 * 1000).toISOString();
 
-  // Always block confirmed bookings
+  // ✅ Block confirmed (handle legacy lowercase + new uppercase)
   const { data: confirmed, error: e1 } = await supabase
     .from("bookings")
     .select("start_date, end_date")
     .eq("vehicle_id", vehicleId)
-    .eq("status", "CONFIRMED")
+    .in("status", ["CONFIRMED", "confirmed"])
     .gte("end_date", todayStr)
     .order("start_date", { ascending: true });
 
@@ -60,13 +56,13 @@ export async function GET(req: Request, ctx: { params: Promise<Params> }) {
       end: r.end_date,
     })) ?? [];
 
-  // Optionally also block *recent* pending holds
+  // ✅ Optionally block recent pending holds (both cases)
   if (includePending) {
     const { data: pending, error: e2 } = await supabase
       .from("bookings")
       .select("start_date, end_date, created_at")
       .eq("vehicle_id", vehicleId)
-      .eq("status", "PENDING")
+      .in("status", ["PENDING", "pending"])
       .gte("created_at", cutoffIso)
       .gte("end_date", todayStr)
       .order("start_date", { ascending: true });

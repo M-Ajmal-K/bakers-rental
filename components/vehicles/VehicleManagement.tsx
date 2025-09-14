@@ -34,7 +34,8 @@ export default function VehicleManagement() {
 
   // Admin-side filters
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
-  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("All");
+  const [availabilityFilter, setAvailabilityFilter] =
+    useState<AvailabilityFilter>("All");
   const [showFilters, setShowFilters] = useState(false); // mobile toggle
 
   const [formData, setFormData] = useState<FormState>({
@@ -88,7 +89,7 @@ export default function VehicleManagement() {
           .from("bookings")
           .select("vehicle_id, start_date, end_date, status")
           .in("vehicle_id", ids)
-          .eq("status", "confirmed")
+          .in("status", ["confirmed", "CONFIRMED"]) // ← match both casings
           .lte("start_date", todayLocal)
           .gte("end_date", todayLocal);
 
@@ -139,7 +140,8 @@ export default function VehicleManagement() {
 
   /* ---------------- Derived: filtered list for admin view ---------------- */
   const filteredVehicles = vehicles.filter((v) => {
-    const categoryOK = selectedCategory === "All" || v.category === selectedCategory;
+    const categoryOK =
+      selectedCategory === "All" || v.category === selectedCategory;
     const availOK =
       availabilityFilter === "All"
         ? true
@@ -237,7 +239,10 @@ export default function VehicleManagement() {
       const res = await fetch("/api/admin/vehicles/create", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
         body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({} as any));
@@ -338,7 +343,10 @@ export default function VehicleManagement() {
       const res = await fetch("/api/admin/vehicles/update", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
         body: JSON.stringify({ id: editingVehicle.id, ...payload }),
       });
       const json = await res.json().catch(() => ({} as any));
@@ -370,7 +378,9 @@ export default function VehicleManagement() {
           : [],
       };
 
-      setVehicles((prev) => prev.map((v) => (v.id === editingVehicle.id ? updated : v)));
+      setVehicles((prev) =>
+        prev.map((v) => (v.id === editingVehicle.id ? updated : v))
+      );
       setIsEditDialogOpen(false);
       setEditingVehicle(null);
       resetForm();
@@ -388,7 +398,10 @@ export default function VehicleManagement() {
     const res = await fetch("/api/admin/vehicles/delete", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
       body: JSON.stringify({ id }),
     });
     const json = await res.json().catch(() => ({} as any));
@@ -427,7 +440,10 @@ export default function VehicleManagement() {
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 sm:space-x-4">
-              <Link href="/admin/dashboard" className="flex items-center space-x-2 sm:space-x-3 group">
+              <Link
+                href="/admin/dashboard"
+                className="flex items-center space-x-2 sm:space-x-3 group"
+              >
                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-black/20 group-hover:scale-110 transition-transform duration-300">
                   <Car className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
@@ -435,7 +451,9 @@ export default function VehicleManagement() {
                   <span className="text-xl sm:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-cyan-100 to-fuchsia-100 bg-clip-text text-transparent">
                     Bakers Rentals
                   </span>
-                  <p className="text-cyan-100/80 text-xs sm:text-sm">Vehicle Management</p>
+                  <p className="text-cyan-100/80 text-xs sm:text-sm">
+                    Vehicle Management
+                  </p>
                 </div>
               </Link>
             </div>
@@ -471,7 +489,9 @@ export default function VehicleManagement() {
               <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-2 sm:mb-4 drop-shadow">
                 Vehicle Fleet Management
               </h1>
-              <p className="text-cyan-100/80 text-sm sm:text-xl">Manage your premium vehicle collection</p>
+              <p className="text-cyan-100/80 text-sm sm:text-xl">
+                Manage your premium vehicle collection
+              </p>
             </div>
 
             <Dialog
@@ -495,9 +515,15 @@ export default function VehicleManagement() {
                 className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
               >
                 <DialogHeader>
-                  <DialogTitle className="text-white text-xl sm:text-2xl">Add New Vehicle</DialogTitle>
-                  <DialogDescription id="add-vehicle-desc" className="text-cyan-100/80">
-                    Upload a photo and fill in the vehicle details. Fields marked * are required.
+                  <DialogTitle className="text-white text-xl sm:text-2xl">
+                    Add New Vehicle
+                  </DialogTitle>
+                  <DialogDescription
+                    id="add-vehicle-desc"
+                    className="text-cyan-100/80"
+                  >
+                    Upload a photo and fill in the vehicle details. Fields marked
+                    * are required.
                   </DialogDescription>
                 </DialogHeader>
                 <VehicleForm
@@ -523,10 +549,13 @@ export default function VehicleManagement() {
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                 </Button>
-                <span className="hidden sm:inline text-cyan-100/80 text-sm">Filter your fleet</span>
+                <span className="hidden sm:inline text-cyan-100/80 text-sm">
+                  Filter your fleet
+                </span>
               </div>
               <div className="hidden sm:block bg-white/5 text-white/90 px-3 py-1 rounded-lg text-sm">
-                {filteredVehicles.length} vehicle{filteredVehicles.length !== 1 ? "s" : ""} shown
+                {filteredVehicles.length} vehicle
+                {filteredVehicles.length !== 1 ? "s" : ""} shown
               </div>
             </div>
 
@@ -596,8 +625,13 @@ export default function VehicleManagement() {
               className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 data-[state=open]:bg-white/10"
             >
               <DialogHeader>
-                <DialogTitle className="text-white text-xl sm:text-2xl">Edit Vehicle</DialogTitle>
-                <DialogDescription id="edit-vehicle-desc" className="text-cyan-100/80">
+                <DialogTitle className="text-white text-xl sm:text-2xl">
+                  Edit Vehicle
+                </DialogTitle>
+                <DialogDescription
+                  id="edit-vehicle-desc"
+                  className="text-cyan-100/80"
+                >
                   Update details or upload a new photo for this vehicle.
                 </DialogDescription>
               </DialogHeader>
