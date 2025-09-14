@@ -24,7 +24,10 @@ export default function VehiclesPage() {
 
   /* ---------------- Load vehicles + override availability for today's bookings ---------------- */
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
+      // 1) Load vehicles (public) as before
       const { data, error } = await supabase
         .from("vehicles")
         .select(
@@ -37,9 +40,10 @@ export default function VehiclesPage() {
         console.error("[VehiclesPage] fetch error:", error);
         return;
       }
+      if (cancelled) return;
 
-      // Resolve images
-      const baseMapped =
+      // 2) Resolve images + map to UI model
+      const baseMapped: Vehicle[] =
         (data || []).map((v: any) => {
           let img: string | null = v.public_url ?? null;
           if (!img && v.image_path) {
@@ -57,7 +61,7 @@ export default function VehiclesPage() {
             year: Number(v.year ?? 0),
             pricePerDay: Number(v.rental_price ?? 0),
             licensePlate: v.registration_number ?? "",
-            available: Boolean(v.available), // will override below if booked
+            available: Boolean(v.available), // will override below
             image: img,
             imagePath: v.image_path ?? null,
             category: v.category ?? "",
@@ -68,38 +72,54 @@ export default function VehiclesPage() {
           } as Vehicle;
         }) || [];
 
-      // Find vehicles booked for TODAY (local)
-      const ids = baseMapped.map((v) => v.id).filter(Boolean);
-      let bookedToday = new Set<string>();
-      if (ids.length > 0) {
-        const todayLocal = format(new Date(), "yyyy-MM-dd");
-        const { data: bData, error: bErr } = await supabase
-          .from("bookings")
-          .select("vehicle_id, start_date, end_date, status")
-          .in("vehicle_id", ids as any[])
-          .eq("status", "confirmed")
-          .lte("start_date", todayLocal)
-          .gte("end_date", todayLocal);
-
-        if (bErr) {
-          console.error("[VehiclesPage] bookings fetch error:", bErr);
-        } else {
-          for (const b of bData || []) {
-            if (b?.vehicle_id) bookedToday.add(String(b.vehicle_id));
-          }
-        }
+      if (baseMapped.length === 0) {
+        if (!cancelled) setVehicles([]);
+        return;
       }
 
-      // Override availability if booked today
+      // 3) Determine "booked today" using server API (service role) to bypass RLS
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+
+      const checks = await Promise.all(
+        baseMapped.map(async (v) => {
+          try {
+            const res = await fetch(
+              `/api/availability/${v.id}?includePending=1`,
+              { cache: "no-store" }
+            );
+            const json = await res.json().catch(() => ({}));
+            const ranges: Array<{ start: string; end: string }> = json?.ranges || [];
+
+            // Unavailable today if any range covers today's date
+            const bookedToday = ranges.some(
+              (r) => (r.start as string) <= todayStr && todayStr <= (r.end as string)
+            );
+
+            return { id: v.id, bookedToday };
+          } catch (e) {
+            console.warn("[VehiclesPage] availability check failed for", v.id, e);
+            return { id: v.id, bookedToday: false };
+          }
+        })
+      );
+
+      const unavailableSet = new Set(
+        checks.filter((c) => c.bookedToday).map((c) => String(c.id))
+      );
+
+      // 4) Override availability if booked today
       const mapped = baseMapped.map((v) => ({
         ...v,
-        available: v.available && !bookedToday.has(String(v.id)),
+        available: v.available && !unavailableSet.has(String(v.id)),
       }));
 
-      setVehicles(mapped);
+      if (!cancelled) setVehicles(mapped);
     };
 
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* ---------------- Animation on scroll ---------------- */
