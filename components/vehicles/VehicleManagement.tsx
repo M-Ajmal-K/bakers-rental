@@ -21,10 +21,19 @@ import VehicleList from "./VehicleList";
 import { FormState, Vehicle } from "./VehicleTypes";
 import { format } from "date-fns";
 
-// Admin filters to mirror customer side
+/* ---------------- Filters (mirror customer side) ---------------- */
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
 const availabilityOptions = ["All", "Available", "Unavailable"] as const;
 type AvailabilityFilter = (typeof availabilityOptions)[number];
+
+/* ---------------- Helpers for images ---------------- */
+type FormImage = NonNullable<FormState["images"]>[number];
+
+const getPublicUrl = (path: string) => {
+  const prefix = `${STORAGE_BUCKET}/`;
+  const key = path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  return supabase.storage.from(STORAGE_BUCKET).getPublicUrl(key).data.publicUrl;
+};
 
 export default function VehicleManagement() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -60,9 +69,12 @@ export default function VehicleManagement() {
     transmission: "",
     fuel: "",
     features: "",
+
+    // gallery fields get populated by VehicleForm
+    images: [],
+    primaryImageId: undefined,
   });
 
-  const [pickedFile, setPickedFile] = useState<File | null>(null);
   const router = useRouter();
 
   /* ---------------- Load vehicles + compute dynamic availability ---------------- */
@@ -193,6 +205,38 @@ export default function VehicleManagement() {
     return categoryOK && availOK;
   });
 
+  /* ---------------- Fetch images for a vehicle when editing ---------------- */
+  const fetchVehicleImages = useCallback(async (vehicleId: string | number) => {
+    const { data, error } = await supabase
+      .from("images")
+      .select("id, path, is_primary, sort_order, created_at")
+      .eq("vehicle_id", vehicleId)
+      .order("is_primary", { ascending: false })
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("[Images] fetch error:", error);
+      return [] as FormImage[];
+    }
+
+    const list =
+      (data || []).map((r) => ({
+        id: String(r.id),
+        path: r.path, // may include bucket prefix; getPublicUrl handles both
+        url: r.path ? getPublicUrl(r.path) : undefined,
+        isPrimary: !!r.is_primary,
+        sortOrder: typeof r.sort_order === "number" ? r.sort_order : 0,
+      })) ?? [];
+
+    // Guarantee one primary (just in case)
+    if (!list.some((i) => i.isPrimary) && list.length > 0) {
+      list[0].isPrimary = true;
+    }
+
+    return list as FormImage[];
+  }, []);
+
   /* ---------------- Helpers ---------------- */
   const resetForm = useCallback(() => {
     setFormData({
@@ -210,33 +254,32 @@ export default function VehicleManagement() {
       transmission: "",
       fuel: "",
       features: "",
+      images: [],
+      primaryImageId: undefined,
     });
-    setPickedFile(null);
   }, []);
 
-  const uploadImage = useCallback(async (file: File) => {
-    const fd = new FormData();
-    fd.append("file", file);
+  /* ---------------- Build multipart payloads ---------------- */
+  const appendCommonVehicleFields = (fd: FormData, source: FormState) => {
+    fd.set("registration_number", source.licensePlate);
+    fd.set("title", source.name);
+    fd.set("brand", source.brand);
+    fd.set("model", source.model);
+    fd.set("year", String(parseInt(source.year || "0", 10) || 0));
+    fd.set("rental_price", String(parseFloat(source.pricePerDay || "0") || 0));
 
-    const res = await fetch("/api/storage/upload", {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store",
-      headers: { "Cache-Control": "no-store" },
-      body: fd,
-    });
-    if (!res.ok) {
-      let msg = "Upload failed";
-      try {
-        const j = await res.json();
-        msg = j.error || msg;
-        console.error("[Vehicles] Upload API error:", j);
-      } catch {}
-      throw new Error(msg);
-    }
-    const data = await res.json();
-    return { publicUrl: data.publicUrl as string, path: data.path as string };
-  }, []);
+    if (source.pricePerDay5Plus !== undefined)
+      fd.set("rental_price_5plus", source.pricePerDay5Plus || "");
+    if (source.pricePerDay8Plus !== undefined)
+      fd.set("rental_price_8plus", source.pricePerDay8Plus || "");
+
+    fd.set("available", String(!!source.available));
+    fd.set("category", source.category || "");
+    fd.set("passengers", String(parseInt(source.passengers || "0", 10) || 0));
+    fd.set("transmission", source.transmission || "");
+    fd.set("fuel", source.fuel || "");
+    fd.set("features", source.features || "");
+  };
 
   /* ---------------- Add ---------------- */
   const handleAddVehicle = useCallback(
@@ -247,63 +290,49 @@ export default function VehicleManagement() {
         return;
       }
 
-      let image_path: string | null = null;
-      let publicUrl: string | null = null;
-      try {
-        if (pickedFile) {
-          const up = await uploadImage(pickedFile);
-          image_path = up.path;
-          publicUrl = up.publicUrl;
-        }
-      } catch (err: any) {
-        alert(err?.message || "Image upload failed.");
+      const imgs = (formData.images ?? []).filter((i) => !i.toDelete);
+      if (imgs.length === 0) {
+        alert("Please add at least one photo for this vehicle.");
         return;
       }
 
-      const payload = {
-        registration_number: formData.licensePlate,
-        title: formData.name,
-        brand: formData.brand,
-        model: formData.model,
-        year: Number.parseInt(formData.year || "0"),
-        rental_price: Number.parseFloat(formData.pricePerDay || "0"),
+      const fd = new FormData();
+      appendCommonVehicleFields(fd, formData);
 
-        // NEW: optional tier prices
-        rental_price_5plus: formData.pricePerDay5Plus
-          ? Number.parseFloat(formData.pricePerDay5Plus)
-          : null,
-        rental_price_8plus: formData.pricePerDay8Plus
-          ? Number.parseFloat(formData.pricePerDay8Plus)
-          : null,
+      const newFiles = imgs.filter((i) => i.file);
+      newFiles.forEach((img) => {
+        if (img.file) fd.append("images", img.file);
+      });
 
-        image_path,
-        public_url: publicUrl,
-        available: formData.available,
-        category: formData.category,
-        passengers: Number(formData.passengers || 0),
-        transmission: formData.transmission,
-        fuel: formData.fuel,
-        features: formData.features
-          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : [],
-      };
+      // Primary: if a new file is marked primary, send primaryIndex (relative to newFiles)
+      const primaryNewIndex = newFiles.findIndex((i) => i.isPrimary);
+      if (primaryNewIndex >= 0) {
+        fd.set("primaryIndex", String(primaryNewIndex));
+      }
 
-      // WRITE via server API (service role) to avoid RLS
+      // Sort order for new files
+      if (newFiles.length > 0) {
+        const sortNew = newFiles.map((i) =>
+          typeof i.sortOrder === "number" ? i.sortOrder : 0
+        );
+        fd.set("sort", JSON.stringify(sortNew));
+      }
+
+      // WRITE via server API (service role)
       const res = await fetch("/api/admin/vehicles/create", {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-        body: JSON.stringify(payload),
+        cache: "no-store",
+        body: fd,
       });
+
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok || !json?.ok) {
         console.error("[Vehicles] insert error:", json);
         alert(json?.error || "Insert failed, check console for details");
         return;
       }
+
       const data = json.vehicle;
 
       const newVehicle: Vehicle = {
@@ -315,7 +344,7 @@ export default function VehicleManagement() {
         pricePerDay: Number(data.rental_price ?? 0),
         licensePlate: data.registration_number ?? "",
         available: Boolean(data.available),
-        image: data.public_url ?? publicUrl ?? null,
+        image: data.public_url ?? null, // API sets to chosen primary
         imagePath: data.image_path ?? null,
         category: data.category ?? "",
         passengers: Number(data.passengers ?? 0),
@@ -334,11 +363,15 @@ export default function VehicleManagement() {
         [data.id]: {
           price5:
             data.rental_price_5plus == null
-              ? payload.rental_price_5plus
+              ? formData.pricePerDay5Plus
+                ? Number(formData.pricePerDay5Plus)
+                : null
               : Number(data.rental_price_5plus),
           price8:
             data.rental_price_8plus == null
-              ? payload.rental_price_8plus
+              ? formData.pricePerDay8Plus
+                ? Number(formData.pricePerDay8Plus)
+                : null
               : Number(data.rental_price_8plus),
         },
       }));
@@ -347,15 +380,16 @@ export default function VehicleManagement() {
       setIsAddDialogOpen(false);
       resetForm();
     },
-    [formData, pickedFile, uploadImage, resetForm]
+    [formData, resetForm]
   );
 
-  /* ---------------- Edit ---------------- */
-  const openEditDialog = (v: Vehicle) => {
+  /* ---------------- Edit (open dialog + hydrate images) ---------------- */
+  const openEditDialog = async (v: Vehicle) => {
     setEditingVehicle(v);
 
     const tiers = tierById[v.id] || {};
-    setFormData({
+    setFormData((s) => ({
+      ...s,
       name: v.name,
       brand: v.brand,
       model: v.model,
@@ -376,71 +410,87 @@ export default function VehicleManagement() {
       transmission: v.transmission || "",
       fuel: v.fuel || "",
       features: (v.features || []).join(", "),
-    });
-    setPickedFile(null);
+    }));
+
+    // Load existing images into form gallery
+    const imgs = await fetchVehicleImages(v.id);
+    setFormData((s) => ({
+      ...s,
+      images: imgs,
+      primaryImageId: imgs.find((i) => i.isPrimary)?.id,
+    }));
+
     setIsEditDialogOpen(true);
   };
 
+  /* ---------------- Edit (submit) ---------------- */
   const handleEditVehicle = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!editingVehicle || !supabase) return;
 
-      let newPublicUrl: string | null = editingVehicle.image;
-      let newImagePath: string | null = null;
-      if (pickedFile) {
-        try {
-          const up = await uploadImage(pickedFile);
-          newPublicUrl = up.publicUrl;
-          newImagePath = up.path;
-        } catch (err: any) {
-          alert(err?.message || "Image upload failed. Keeping previous image.");
-        }
+      const fd = new FormData();
+      fd.set("id", String(editingVehicle.id));
+      appendCommonVehicleFields(fd, formData);
+
+      const imgs = formData.images ?? [];
+
+      const existing = imgs.filter((i) => i.id && !i.file);
+      const newOnes = imgs.filter((i) => i.file && !i.toDelete);
+      const toDeleteIds = imgs
+        .filter((i) => i.toDelete && i.id)
+        .map((i) => String(i.id));
+
+      // attach files
+      newOnes.forEach((img) => {
+        if (img.file) fd.append("images", img.file);
+      });
+
+      // primary logic:
+      const primaryExisting = existing.find((i) => i.isPrimary && !i.toDelete);
+      const primaryNewIndex = newOnes.findIndex((i) => i.isPrimary);
+
+      if (primaryExisting?.id) {
+        fd.set("primaryId", String(primaryExisting.id));
+      } else if (primaryNewIndex >= 0) {
+        fd.set("primaryIndex", String(primaryNewIndex));
       }
 
-      const payload: any = {
-        registration_number: formData.licensePlate,
-        title: formData.name,
-        brand: formData.brand,
-        model: formData.model,
-        year: Number.parseInt(formData.year || "0"),
-        rental_price: Number.parseFloat(formData.pricePerDay || "0"),
+      // sorting
+      const sortExisting = existing.map((i) => ({
+        id: String(i.id),
+        sortOrder: typeof i.sortOrder === "number" ? i.sortOrder : 0,
+      }));
+      const sortNew = newOnes.map((i) =>
+        typeof i.sortOrder === "number" ? i.sortOrder : 0
+      );
 
-        // NEW: optional tier prices
-        rental_price_5plus: formData.pricePerDay5Plus
-          ? Number.parseFloat(formData.pricePerDay5Plus)
-          : null,
-        rental_price_8plus: formData.pricePerDay8Plus
-          ? Number.parseFloat(formData.pricePerDay8Plus)
-          : null,
-
-        available: formData.available,
-        category: formData.category,
-        passengers: Number(formData.passengers || 0),
-        transmission: formData.transmission,
-        fuel: formData.fuel,
-        features: formData.features
-          ? formData.features.split(",").map((f) => f.trim()).filter(Boolean)
-          : [],
-      };
-      if (newImagePath) payload.image_path = newImagePath;
-      if (newPublicUrl) payload.public_url = newPublicUrl;
+      if (sortExisting.length) fd.set("sortExisting", JSON.stringify(sortExisting));
+      if (sortNew.length) fd.set("sortNew", JSON.stringify(sortNew));
+      if (toDeleteIds.length) fd.set("deleteIds", JSON.stringify(toDeleteIds));
 
       // WRITE via server API (service role)
       const res = await fetch("/api/admin/vehicles/update", {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-        body: JSON.stringify({ id: editingVehicle.id, ...payload }),
+        cache: "no-store",
+        body: fd,
       });
       const json = await res.json().catch(() => ({} as any));
       if (!res.ok || !json?.ok) {
         console.error("[Vehicles] update error:", json);
         alert(json?.error || "Update failed");
         return;
+      }
+
+      // Refresh that vehicle from public view to get updated public_url
+      const { data: fresh, error: selErr } = await supabase
+        .from("vehicles")
+        .select("*")
+        .eq("id", editingVehicle.id)
+        .single();
+      if (selErr) {
+        console.warn("[Vehicles] refresh after update failed:", selErr.message);
       }
 
       const updated: Vehicle = {
@@ -452,8 +502,8 @@ export default function VehicleManagement() {
         pricePerDay: Number(formData.pricePerDay || "0"),
         licensePlate: formData.licensePlate,
         available: formData.available,
-        image: newPublicUrl,
-        imagePath: newImagePath ?? editingVehicle.imagePath,
+        image: fresh?.public_url ?? editingVehicle.image,
+        imagePath: fresh?.image_path ?? editingVehicle.imagePath,
         category: formData.category,
         passengers: Number(formData.passengers || 0),
         transmission: formData.transmission,
@@ -469,8 +519,12 @@ export default function VehicleManagement() {
       setTierById((m) => ({
         ...m,
         [editingVehicle.id]: {
-          price5: payload.rental_price_5plus,
-          price8: payload.rental_price_8plus,
+          price5: formData.pricePerDay5Plus
+            ? Number(formData.pricePerDay5Plus)
+            : null,
+          price8: formData.pricePerDay8Plus
+            ? Number(formData.pricePerDay8Plus)
+            : null,
         },
       }));
 
@@ -481,7 +535,7 @@ export default function VehicleManagement() {
       setEditingVehicle(null);
       resetForm();
     },
-    [editingVehicle, formData, pickedFile, uploadImage, resetForm]
+    [editingVehicle, formData, resetForm]
   );
 
   /* ---------------- Delete ---------------- */
@@ -506,7 +560,7 @@ export default function VehicleManagement() {
       return;
     }
 
-    // Optional: remove image from storage (kept as-is)
+    // Optional: remove legacy single image from storage (kept as-is)
     if (victim?.imagePath) {
       await supabase.storage.from(STORAGE_BUCKET).remove([victim.imagePath]);
     }
@@ -622,7 +676,7 @@ export default function VehicleManagement() {
                     id="add-vehicle-desc"
                     className="text-cyan-100/80"
                   >
-                    Upload a photo and fill in the vehicle details. Fields marked
+                    Upload photos and fill in the vehicle details. Fields marked
                     * are required.
                   </DialogDescription>
                 </DialogHeader>
@@ -630,7 +684,6 @@ export default function VehicleManagement() {
                   formData={formData}
                   setFormData={setFormData}
                   onSubmit={handleAddVehicle}
-                  onFilePicked={setPickedFile}
                 />
               </DialogContent>
             </Dialog>
@@ -732,14 +785,13 @@ export default function VehicleManagement() {
                   id="edit-vehicle-desc"
                   className="text-cyan-100/80"
                 >
-                  Update details or upload a new photo for this vehicle.
+                  Update details or manage photos for this vehicle.
                 </DialogDescription>
               </DialogHeader>
               <VehicleForm
                 formData={formData}
                 setFormData={setFormData}
                 onSubmit={handleEditVehicle}
-                onFilePicked={setPickedFile}
                 isEdit
               />
             </DialogContent>

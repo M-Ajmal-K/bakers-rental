@@ -1,5 +1,15 @@
 export type VehicleId = string | number;
 
+/** One image record tied to a vehicle (from public.images + storage path) */
+export interface VehicleImage {
+  id: string;            // images.id (uuid)
+  path: string;          // storage path: vehicle-photos/<vehicle_id>/<uuid>.jpg
+  url: string;           // public URL resolved from `path`
+  isPrimary: boolean;    // exactly one per vehicle (enforced by unique index)
+  sortOrder: number;     // manual ordering for gallery
+  createdAt?: string;    // optional display
+}
+
 export interface Vehicle {
   id: VehicleId;
   name: string; // DB: title
@@ -16,9 +26,15 @@ export interface Vehicle {
 
   licensePlate: string; // DB: registration_number
   available: boolean;
-  image: string | null; // public URL
-  imagePath?: string | null; // storage path
 
+  /** 🔽 Legacy single image fields (kept for backward compatibility) */
+  image: string | null;         // public URL (legacy primary image)
+  imagePath?: string | null;    // storage path (legacy)
+
+  /** 🔽 New multi-image gallery */
+  images?: VehicleImage[];      // full gallery
+  primaryImageUrl?: string;     // convenience: first primary image URL (fallback to `image`)
+  
   // UI-only fields
   category: string;
   passengers: number;
@@ -27,6 +43,7 @@ export interface Vehicle {
   features: string[];
 }
 
+/** Admin form state */
 export type FormState = {
   name: string;
   brand: string;
@@ -48,6 +65,22 @@ export type FormState = {
   transmission: string;
   fuel: string;
   features: string;
+
+  /** 🔽 New (optional) fields for multi-image editing UI.
+   * We’ll wire these in the form step so they’re safe to add now.
+   */
+  primaryImageId?: string;           // which gallery image is primary
+  // We’ll represent images in the form as a light structure so we can handle
+  // new uploads + existing ones together without breaking types elsewhere.
+  images?: Array<{
+    id?: string;                     // existing DB id
+    file?: File;                     // new upload
+    path?: string;                   // storage path for existing
+    url?: string;                    // resolved public URL for existing
+    isPrimary?: boolean;
+    sortOrder?: number;
+    toDelete?: boolean;              // mark existing for deletion
+  }>;
 };
 
 // UI dropdowns
