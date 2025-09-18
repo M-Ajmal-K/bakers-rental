@@ -32,6 +32,11 @@ export default function VehicleManagement() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
+  // keep the extra tier prices separate so we don't have to touch Vehicle type
+  const [tierById, setTierById] = useState<
+    Record<string | number, { price5?: number | null; price8?: number | null }>
+  >({});
+
   // Admin-side filters
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [availabilityFilter, setAvailabilityFilter] =
@@ -44,6 +49,10 @@ export default function VehicleManagement() {
     model: "",
     year: "",
     pricePerDay: "",
+    // new tier fields (string inputs)
+    pricePerDay5Plus: "",
+    pricePerDay8Plus: "",
+
     licensePlate: "",
     available: true,
     category: "",
@@ -63,12 +72,30 @@ export default function VehicleManagement() {
     const load = async () => {
       if (!supabase) return;
 
-      // 1) Load vehicles
+      // 1) Load vehicles (include tier columns)
       const { data: vData, error: vErr } = await supabase
         .from("vehicles")
         .select(
-          `id, registration_number, title, brand, model, year, rental_price, 
-           image_path, public_url, available, created_at, category, passengers, transmission, fuel, features`
+          `
+          id,
+          registration_number,
+          title,
+          brand,
+          model,
+          year,
+          rental_price,
+          rental_price_5plus,
+          rental_price_8plus,
+          image_path,
+          public_url,
+          available,
+          created_at,
+          category,
+          passengers,
+          transmission,
+          fuel,
+          features
+        `
         )
         .order("created_at", { ascending: false });
 
@@ -129,6 +156,21 @@ export default function VehicleManagement() {
             : [],
         })) || [];
 
+      // stash tier prices in a side map
+      const tiers: Record<
+        string | number,
+        { price5?: number | null; price8?: number | null }
+      > = {};
+      for (const v of vehiclesRaw) {
+        tiers[v.id] = {
+          price5:
+            v.rental_price_5plus == null ? null : Number(v.rental_price_5plus),
+          price8:
+            v.rental_price_8plus == null ? null : Number(v.rental_price_8plus),
+        };
+      }
+
+      setTierById(tiers);
       setVehicles(mapped);
     };
 
@@ -159,6 +201,8 @@ export default function VehicleManagement() {
       model: "",
       year: "",
       pricePerDay: "",
+      pricePerDay5Plus: "",
+      pricePerDay8Plus: "",
       licensePlate: "",
       available: true,
       category: "",
@@ -223,6 +267,15 @@ export default function VehicleManagement() {
         model: formData.model,
         year: Number.parseInt(formData.year || "0"),
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
+
+        // NEW: optional tier prices
+        rental_price_5plus: formData.pricePerDay5Plus
+          ? Number.parseFloat(formData.pricePerDay5Plus)
+          : null,
+        rental_price_8plus: formData.pricePerDay8Plus
+          ? Number.parseFloat(formData.pricePerDay8Plus)
+          : null,
+
         image_path,
         public_url: publicUrl,
         available: formData.available,
@@ -275,6 +328,21 @@ export default function VehicleManagement() {
           : [],
       };
 
+      // keep tiers
+      setTierById((m) => ({
+        ...m,
+        [data.id]: {
+          price5:
+            data.rental_price_5plus == null
+              ? payload.rental_price_5plus
+              : Number(data.rental_price_5plus),
+          price8:
+            data.rental_price_8plus == null
+              ? payload.rental_price_8plus
+              : Number(data.rental_price_8plus),
+        },
+      }));
+
       setVehicles((prev) => [newVehicle, ...prev]);
       setIsAddDialogOpen(false);
       resetForm();
@@ -285,12 +353,22 @@ export default function VehicleManagement() {
   /* ---------------- Edit ---------------- */
   const openEditDialog = (v: Vehicle) => {
     setEditingVehicle(v);
+
+    const tiers = tierById[v.id] || {};
     setFormData({
       name: v.name,
       brand: v.brand,
       model: v.model,
       year: v.year.toString(),
       pricePerDay: v.pricePerDay.toString(),
+      pricePerDay5Plus:
+        tiers.price5 != null && !Number.isNaN(tiers.price5)
+          ? String(tiers.price5)
+          : "",
+      pricePerDay8Plus:
+        tiers.price8 != null && !Number.isNaN(tiers.price8)
+          ? String(tiers.price8)
+          : "",
       licensePlate: v.licensePlate,
       available: v.available,
       category: v.category || "",
@@ -327,6 +405,15 @@ export default function VehicleManagement() {
         model: formData.model,
         year: Number.parseInt(formData.year || "0"),
         rental_price: Number.parseFloat(formData.pricePerDay || "0"),
+
+        // NEW: optional tier prices
+        rental_price_5plus: formData.pricePerDay5Plus
+          ? Number.parseFloat(formData.pricePerDay5Plus)
+          : null,
+        rental_price_8plus: formData.pricePerDay8Plus
+          ? Number.parseFloat(formData.pricePerDay8Plus)
+          : null,
+
         available: formData.available,
         category: formData.category,
         passengers: Number(formData.passengers || 0),
@@ -378,6 +465,15 @@ export default function VehicleManagement() {
           : [],
       };
 
+      // update tiers map too
+      setTierById((m) => ({
+        ...m,
+        [editingVehicle.id]: {
+          price5: payload.rental_price_5plus,
+          price8: payload.rental_price_8plus,
+        },
+      }));
+
       setVehicles((prev) =>
         prev.map((v) => (v.id === editingVehicle.id ? updated : v))
       );
@@ -416,6 +512,10 @@ export default function VehicleManagement() {
     }
 
     setVehicles((prev) => prev.filter((v) => v.id !== id));
+    setTierById((m) => {
+      const { [id]: _remove, ...rest } = m;
+      return rest;
+    });
   };
 
   /* ---------------- Logout (cookie-based) ---------------- */

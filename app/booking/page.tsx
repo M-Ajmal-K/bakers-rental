@@ -160,7 +160,7 @@ export default function BookingPage() {
     const load = async () => {
       const { data, error } = await supabase
         .from("vehicles")
-        .select("id, title, category, rental_price, available")
+        .select("id, title, category, rental_price, rental_price_5plus, rental_price_8plus, available")
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -176,6 +176,11 @@ export default function BookingPage() {
           model: "",
           category: v.category ?? "",
           pricePerDay: Number(v.rental_price ?? 0),
+
+          // ✅ tiered prices (optional)
+          pricePerDay5Plus: v.rental_price_5plus != null ? Number(v.rental_price_5plus) : undefined,
+          pricePerDay8Plus: v.rental_price_8plus != null ? Number(v.rental_price_8plus) : undefined,
+
           available: Boolean(v.available),
           passengers: 0,
           transmission: "",
@@ -296,7 +301,8 @@ export default function BookingPage() {
     "before:content-[''] before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:-translate-y-1/2 before:bg-red-500/70 before:rotate-[-18deg] " +
     "after:content-[''] after:absolute after:left-1 after:right-1 after:top-1/2 after:h-[2px] after:-translate-y-1/2 after:bg-red-500/70 after:rotate-[18deg]";
 
-  /* ---------------- Price helpers ---------------- */
+  /* ---------------- Price helpers (tiered) ---------------- */
+
   const calculateDays = () => {
     if (pickupDate && returnDate) {
       const diffTime = Math.abs(returnDate.getTime() - pickupDate.getTime());
@@ -306,12 +312,67 @@ export default function BookingPage() {
     return 1;
   };
 
+  // 👉 Applies single-tier rate to *all* days once threshold is met
+  const calculateTieredTotal = (v: Vehicle, days: number) => {
+    const base = v.pricePerDay;
+    const rate5 = v.pricePerDay5Plus ?? base; // fallback if not set
+    const rate8 = v.pricePerDay8Plus ?? rate5; // fallback if not set
+
+    if (days <= 4) return days * base;   // base price only for ≤4 days
+    if (days <= 7) return days * rate5;  // 5–7 days -> tier price × all days
+    return days * rate8;                 // 8+ days -> higher tier × all days
+  };
+
+  // 👉 Breakdown reflects the single-tier pricing across all days
+  const breakdownText = (v: Vehicle, days: number) => {
+    const base = v.pricePerDay;
+    const rate5 = v.pricePerDay5Plus ?? base;
+    const rate8 = v.pricePerDay8Plus ?? rate5;
+
+    let rate = base;
+    if (days >= 8) rate = rate8;
+    else if (days >= 5) rate = rate5;
+
+    return `${days} × $${rate}`;
+  };
+
   const calculateTotal = () => {
     if (selectedVehicleData) {
-      return selectedVehicleData.pricePerDay * calculateDays();
+      return calculateTieredTotal(selectedVehicleData, calculateDays());
     }
     return 0;
   };
+
+  // 🔥 Live "current tier" info used across UI (dates & summary)
+  const currentTier = useMemo(() => {
+    if (!selectedVehicleData) return null;
+    const days = calculateDays();
+
+    const base = selectedVehicleData.pricePerDay;
+    const rate5 = selectedVehicleData.pricePerDay5Plus ?? base;
+    const rate8 = selectedVehicleData.pricePerDay8Plus ?? rate5;
+
+    let label = "Base (1–4 days)";
+    let rate = base;
+
+    if (days >= 8) {
+      label = "8+ days tier";
+      rate = rate8;
+    } else if (days >= 5) {
+      label = "5–7 days tier";
+      rate = rate5;
+    }
+
+    return {
+      days,
+      label,
+      rate,
+      breakdown: breakdownText(selectedVehicleData, days),
+      base,
+      rate5,
+      rate8,
+    };
+  }, [selectedVehicleData, pickupDate, returnDate]);
 
   /* ---------------- Submit & Confirm ---------------- */
   const handleSubmit = (e: React.FormEvent) => {
@@ -407,7 +468,7 @@ export default function BookingPage() {
           <DialogContent
             className={cn(
               // width
-              "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl",
+              "w-[calc(100vw-1rem)] sm:w_full sm:max-w-2xl lg:max-w-3xl".replace("_", "-"),
               // height clamp -> use dvh so mobile browser UI doesn't break layout
               "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
               // structure
@@ -604,6 +665,9 @@ export default function BookingPage() {
 
   /* ---------------- SUMMARY SCREEN ---------------- */
   if (showSummary) {
+    const days = calculateDays();
+    const breakdown = selectedVehicleData ? breakdownText(selectedVehicleData, days) : "";
+
     return (
       <div className="min-h-screen bg-background">
         <nav className="sticky top-0 z-50 glass-effect border-b border-border/20">
@@ -627,7 +691,7 @@ export default function BookingPage() {
                   <div className="w-16 h-16 md:w-20 md:h-20 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6">
                     <CheckCircle className="h-8 w-8 md:h-10 md:w-10 text-white" />
                   </div>
-                  <CardTitle className="text-2xl md:text-3xl text-foreground mb-2 md:mb-4">Booking Summary</CardTitle>
+                  <CardTitle className="text-2xl md:3xl text-foreground mb-2 md:mb-4">Booking Summary</CardTitle>
                   <p className="text-muted-foreground text-sm md:text-lg">Please review your booking details carefully</p>
                 </CardHeader>
                 <CardContent className="space-y-6 md:space-y-8">
@@ -648,7 +712,7 @@ export default function BookingPage() {
                             <span className="font-medium">{selectedVehicleData?.category}</span>
                           </p>
                           <p className="flex justify-between">
-                            <span className="text-muted-foreground">Daily Rate:</span>
+                            <span className="text-muted-foreground">Base Daily:</span>
                             <span className="font-bold text-primary">${selectedVehicleData?.pricePerDay}</span>
                           </p>
                         </div>
@@ -673,7 +737,7 @@ export default function BookingPage() {
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Duration:</span>
                             <span className="font-bold text-secondary">
-                              {calculateDays()} day{calculateDays() !== 1 ? "s" : ""}
+                              {days} day{days !== 1 ? "s" : ""}
                             </span>
                           </p>
                         </div>
@@ -728,21 +792,28 @@ export default function BookingPage() {
                   {customerInfo.notes && (
                     <Card className="border-0 bg-gradient-to-r from-muted/20 to-muted/10">
                       <CardContent className="p-4 md:p-6">
-                        <h3 className="font-bold text-foreground mb-2 md:mb-3 text-base md:text-lg">Special Notes</h3>
+                        <h3 className="text-base md:text-lg font-bold text-foreground mb-2 md:mb-3">Special Notes</h3>
                         <p className="text-muted-foreground italic text-sm md:text-base">{customerInfo.notes}</p>
                       </CardContent>
                     </Card>
                   )}
 
                   <Card className="border-0 bg-gradient-to-r from-primary to-secondary">
-                    <CardContent className="p-4 md:p-6 text-center">
-                      <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white mb-1 md:mb-2">
+                    <CardContent className="p-4 md:pb-6 text-center space-y-2">
+                      <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white">
                         <span>Total Amount:</span>
                         <span>${calculateTotal()}</span>
                       </div>
-                      <p className="text-white/80 text-xs md:text-base">
-                        ({calculateDays()} day{calculateDays() !== 1 ? "s" : ""} × ${selectedVehicleData?.pricePerDay})
-                      </p>
+                      {currentTier && (
+                        <>
+                          <p className="text-white/85 text-xs md:text-sm">
+                            {currentTier.breakdown}
+                          </p>
+                          <p className="text-white/85 text-xs md:text-sm">
+                            Current tier: <span className="font-semibold">{currentTier.label}</span> — ${currentTier.rate}/day
+                          </p>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -937,6 +1008,37 @@ export default function BookingPage() {
                           </Popover>
                         </div>
                       </div>
+
+                      {/* ▼ Tier prices + current tier note */}
+                      {selectedVehicleData && currentTier && (
+                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs md:text-sm">
+                          <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
+                            <p className="text-muted-foreground">Base (1–4 days)</p>
+                            <p className="font-semibold">${currentTier.base}</p>
+                          </div>
+                          <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
+                            <p className="text-muted-foreground">5–7 days</p>
+                            <p className="font-semibold">
+                              ${currentTier.rate5}{currentTier.rate5 === currentTier.base ? " (same as base)" : ""}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
+                            <p className="text-muted-foreground">8+ days</p>
+                            <p className="font-semibold">
+                              ${currentTier.rate8}{currentTier.rate8 === currentTier.rate5 ? " (same as 5–7)" : ""}
+                            </p>
+                          </div>
+
+                          <div className="sm:col-span-3 rounded-lg bg-primary/10 border border-primary/30 p-2.5">
+                            <p className="text-xs md:text-sm text-primary font-medium">
+                              Current tier: <span className="font-bold">{currentTier.label}</span> — ${currentTier.rate}/day
+                              {currentTier.days > 0 && (
+                                <> (for your {currentTier.days} day{currentTier.days !== 1 ? "s" : ""} selection)</>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -1118,15 +1220,23 @@ export default function BookingPage() {
 
                           <div className="space-y-3 md:space-y-4">
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
-                              <span className="text-muted-foreground">Daily Rate:</span>
-                              <span className="font-bold text-primary">${selectedVehicleData.pricePerDay}</span>
+                              <span className="text-muted-foreground">Current Daily Rate:</span>
+                              <span className="font-bold text-primary">
+                                {currentTier ? `$${currentTier.rate}` : `$${selectedVehicleData.pricePerDay}`}
+                              </span>
                             </div>
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Duration:</span>
                               <span className="font-bold">
-                                {calculateDays()} day{calculateDays() !== 1 ? "s" : ""}
+                                {currentTier ? currentTier.days : calculateDays()} day{(currentTier ? currentTier.days : calculateDays()) !== 1 ? "s" : ""}
                               </span>
                             </div>
+                            {currentTier?.breakdown && (
+                              <div className="p-3 bg-card/50 rounded-lg text-xs md:text-sm text-muted-foreground">
+                                <span className="block">Breakdown:</span>
+                                <span className="font-mono text-foreground">{currentTier.breakdown}</span>
+                              </div>
+                            )}
                             <div className="flex justify-between items-center p-4 gradient-primary rounded-lg text-white">
                               <span className="text-base md:text-lg font-bold">Total:</span>
                               <span className="text-xl md:text-2xl font-bold">${calculateTotal()}</span>
