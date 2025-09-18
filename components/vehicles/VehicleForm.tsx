@@ -111,7 +111,7 @@ const VehicleForm = memo(function VehicleForm({
         </div>
       </div>
 
-      {/* Row 3 */}
+      {/* Row 3: Base + Tiered pricing + seats/year */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="space-y-2">
           <Label
@@ -131,7 +131,58 @@ const VehicleForm = memo(function VehicleForm({
             required
             className="text-white placeholder:text-white/60 h-12 rounded-lg"
           />
+          <p className="text-[11px] text-white/60">
+            Applies to days 1–4 (and whenever tiers are not set)
+          </p>
         </div>
+
+        <div className="space-y-2">
+          <Label
+            htmlFor="pricePerDay5Plus"
+            className="text-white text-sm sm:text-base"
+          >
+            Price per Day – 5-7 days ($)
+          </Label>
+          <Input
+            id="pricePerDay5Plus"
+            type="number"
+            placeholder="e.g., 80"
+            value={formData.pricePerDay5Plus ?? ""}
+            onChange={(e) =>
+              setFormData((s) => ({ ...s, pricePerDay5Plus: e.target.value }))
+            }
+            className="text-white placeholder:text-white/60 h-12 rounded-lg"
+          />
+          <p className="text-[11px] text-white/60">
+            Optional. Applies from day 5 through day 7.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label
+            htmlFor="pricePerDay8Plus"
+            className="text-white text-sm sm:text-base"
+          >
+            Price per Day – 8+ days ($)
+          </Label>
+          <Input
+            id="pricePerDay8Plus"
+            type="number"
+            placeholder="e.g., 75"
+            value={formData.pricePerDay8Plus ?? ""}
+            onChange={(e) =>
+              setFormData((s) => ({ ...s, pricePerDay8Plus: e.target.value }))
+            }
+            className="text-white placeholder:text-white/60 h-12 rounded-lg"
+          />
+          <p className="text-[11px] text-white/60">
+            Optional. Applies from day 8 onward.
+          </p>
+        </div>
+      </div>
+
+      {/* Row 4 */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="space-y-2">
           <Label
             htmlFor="passengers"
@@ -167,10 +218,6 @@ const VehicleForm = memo(function VehicleForm({
             className="text-white placeholder:text-white/60 h-12 rounded-lg"
           />
         </div>
-      </div>
-
-      {/* Row 4 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="space-y-2">
           <Label
             htmlFor="transmission"
@@ -196,6 +243,10 @@ const VehicleForm = memo(function VehicleForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      {/* Row 5 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="space-y-2">
           <Label htmlFor="fuel" className="text-white text-sm sm:text-base">
             Fuel Type
@@ -218,26 +269,26 @@ const VehicleForm = memo(function VehicleForm({
             </SelectContent>
           </Select>
         </div>
-      </div>
 
-      {/* License Plate */}
-      <div className="space-y-2">
-        <Label
-          htmlFor="licensePlate"
-          className="text-white text-sm sm:text-base"
-        >
-          License Plate
-        </Label>
-        <Input
-          id="licensePlate"
-          placeholder="FJ-1234"
-          value={formData.licensePlate}
-          onChange={(e) =>
-            setFormData((s) => ({ ...s, licensePlate: e.target.value }))
-          }
-          required
-          className="text-white placeholder:text-white/60 h-12 rounded-lg"
-        />
+        {/* License Plate */}
+        <div className="space-y-2">
+          <Label
+            htmlFor="licensePlate"
+            className="text-white text-sm sm:text-base"
+          >
+            License Plate
+          </Label>
+          <Input
+            id="licensePlate"
+            placeholder="FJ-1234"
+            value={formData.licensePlate}
+            onChange={(e) =>
+              setFormData((s) => ({ ...s, licensePlate: e.target.value }))
+            }
+            required
+            className="text-white placeholder:text-white/60 h-12 rounded-lg"
+          />
+        </div>
       </div>
 
       {/* Image upload */}

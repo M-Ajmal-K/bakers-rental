@@ -6,7 +6,14 @@ export interface Vehicle {
   brand: string;
   model: string;
   year: number;
+
+  // Base daily price
   pricePerDay: number; // DB: rental_price
+
+  // Optional tiered daily prices
+  pricePerDay5Plus?: number | null; // DB: rental_price_5plus (applies from day 5 to 7)
+  pricePerDay8Plus?: number | null; // DB: rental_price_8plus (applies from day 8+)
+
   licensePlate: string; // DB: registration_number
   available: boolean;
   image: string | null; // public URL
@@ -25,7 +32,14 @@ export type FormState = {
   brand: string;
   model: string;
   year: string;
+
+  // Base daily price input
   pricePerDay: string;
+
+  // Optional tiered daily price inputs
+  pricePerDay5Plus?: string; // DB: rental_price_5plus
+  pricePerDay8Plus?: string; // DB: rental_price_8plus
+
   licensePlate: string;
   available: boolean;
 
