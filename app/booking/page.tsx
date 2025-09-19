@@ -25,7 +25,8 @@ import {
   FileCheck2,
   Landmark,
   Banknote,
-  Smartphone
+  Smartphone,
+  ShieldCheck
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -35,11 +36,11 @@ import { Vehicle } from "@/components/vehicles/VehicleTypes";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogDescription,
   DialogFooter
 } from "@/components/ui/dialog";
+import JsonLd from "@/components/seo/JsonLd";
 
 /* -------------------------------- Helpers -------------------------------- */
 
@@ -126,6 +127,33 @@ const WALLET = {
   phoneContact: "+6798716960",
 };
 
+/* ---------------- Bond / Deposit ---------------- */
+const BOND_FJD = 200; // Only this amount is due now; rental balance is paid on arrival.
+
+/* ---------------- SEO: SITE_URL + Breadcrumb JSON-LD ---------------- */
+const SITE_URL =
+  (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/+$/, "");
+
+// Breadcrumb data
+const breadcrumbBooking = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Home",
+      item: `${SITE_URL}/`,
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Booking",
+      item: `${SITE_URL}/booking`,
+    },
+  ],
+} as const;
+
 /* -------------------------------- Component -------------------------------- */
 
 export default function BookingPage() {
@@ -146,8 +174,8 @@ export default function BookingPage() {
   });
   const [showSummary, setShowSummary] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [showPayment, setShowPayment] = useState(false); // NEW
-  const [bookingCode, setBookingCode] = useState<string | null>(null); // show code after create
+  const [showPayment, setShowPayment] = useState(false);
+  const [bookingCode, setBookingCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // availability state
@@ -295,7 +323,7 @@ export default function BookingPage() {
     [pickupDate, todayStart, rangeMatchers]
   );
 
-  // Class to visually cross booked days (without changing your theme)
+  // Class to visually cross booked days (typo fixed for after:-translate-y-1/2)
   const unavailableClass =
     "relative opacity-60 " +
     "before:content-[''] before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:-translate-y-1/2 before:bg-red-500/70 before:rotate-[-18deg] " +
@@ -461,19 +489,19 @@ export default function BookingPage() {
       `${WHATSAPP_MSG_PREFIX} ${bookingCode || ""}`
     )}`;
 
+    // bond math for dialog
+    const totalNow = calculateTotal();
+    const balanceDue = Math.max(totalNow - BOND_FJD, 0);
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         {/* Payment dialog (auto-opened) */}
         <Dialog open={showPayment} onOpenChange={setShowPayment}>
           <DialogContent
             className={cn(
-              // width
-              "w-[calc(100vw-1rem)] sm:w_full sm:max-w-2xl lg:max-w-3xl".replace("_", "-"),
-              // height clamp -> use dvh so mobile browser UI doesn't break layout
+              "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl",
               "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
-              // structure
               "p-0 overflow-hidden rounded-2xl border-0 flex flex-col",
-              // shadow
               "shadow-[0_20px_60px_-10px_rgba(0,0,0,0.5)]"
             )}
           >
@@ -507,6 +535,23 @@ export default function BookingPage() {
               </div>
             </div>
 
+            {/* 🔔 Bond notice */}
+            <div className="px-4 sm:px-6 pt-4">
+              <div className="rounded-xl bg-green-600/10 border border-green-500/30 p-3 sm:p-4 flex items-start gap-3">
+                <div className="mt-0.5">
+                  <ShieldCheck className="h-5 w-5 text-green-500" />
+                </div>
+                <div className="text-sm sm:text-base">
+                  <p className="font-semibold text-foreground">
+                    Pay only the refundable bond: <span className="font-bold">$ {BOND_FJD} FJD</span>.
+                  </p>
+                  <p className="text-muted-foreground">
+                    The rental balance is paid on arrival.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Scrollable content */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
               {/* Mobile booking code pill */}
@@ -518,15 +563,19 @@ export default function BookingPage() {
                 </div>
               )}
 
-              {/* Summary row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Summary row with bond/balance */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
-                  <p className="text-xs text-muted-foreground">Total Due</p>
-                  <p className="text-lg font-semibold">${calculateTotal()}</p>
+                  <p className="text-xs text-muted-foreground">Total Trip</p>
+                  <p className="text-lg font-semibold">${totalNow}</p>
+                </div>
+                <div className="rounded-xl bg-background/70 border border-green-500/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
+                  <p className="text-xs text-green-600">Due Now (Bond)</p>
+                  <p className="text-lg font-semibold">${BOND_FJD} FJD</p>
                 </div>
                 <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
-                  <p className="text-xs text-muted-foreground">Contact (Wallet)</p>
-                  <p className="text-sm font-medium break-words">{WALLET.phoneContact}</p>
+                  <p className="text-xs text-muted-foreground">Balance on Arrival</p>
+                  <p className="text-lg font-semibold">${balanceDue}</p>
                 </div>
               </div>
 
@@ -595,7 +644,7 @@ export default function BookingPage() {
                   <ol className="space-y-2 sm:space-y-2.5 text-sm">
                     <li className="flex gap-2">
                       <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">1</span>
-                      <span>Send your payment using one of the methods above with the exact details.</span>
+                      <span>Send <strong>only the bond (${BOND_FJD} FJD)</strong> now using one of the methods above.</span>
                     </li>
                     <li className="flex gap-2">
                       <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">2</span>
@@ -667,6 +716,8 @@ export default function BookingPage() {
   if (showSummary) {
     const days = calculateDays();
     const breakdown = selectedVehicleData ? breakdownText(selectedVehicleData, days) : "";
+    const total = calculateTotal();
+    const balanceDue = Math.max(total - BOND_FJD, 0);
 
     return (
       <div className="min-h-screen bg-background">
@@ -728,11 +779,11 @@ export default function BookingPage() {
                         <div className="space-y-2 md:space-y-3 text-sm md:text-base">
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Pickup:</span>
-                            <span className="font-medium">{pickupDate && format(pickupDate, "PPP")}</span>
+                            <span className="font-medium">{pickupDate ? format(pickupDate, "PPP") : ""}</span>
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Return:</span>
-                            <span className="font-medium">{returnDate && format(returnDate, "PPP")}</span>
+                            <span className="font-medium">{returnDate ? format(returnDate, "PPP") : ""}</span>
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Duration:</span>
@@ -802,8 +853,19 @@ export default function BookingPage() {
                     <CardContent className="p-4 md:pb-6 text-center space-y-2">
                       <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white">
                         <span>Total Amount:</span>
-                        <span>${calculateTotal()}</span>
+                        <span>${total}</span>
                       </div>
+
+                      {/* Bond & balance note */}
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="rounded-md bg-white/10 text-white px-3 py-2 text-sm">
+                          <span className="font-semibold">Due now (Bond):</span> ${BOND_FJD} FJD
+                        </div>
+                        <div className="rounded-md bg-white/10 text-white px-3 py-2 text-sm">
+                          <span className="font-semibold">Balance on arrival:</span> ${balanceDue}
+                        </div>
+                      </div>
+
                       {currentTier && (
                         <>
                           <p className="text-white/85 text-xs md:text-sm">
@@ -1292,6 +1354,9 @@ export default function BookingPage() {
           </div>
         </div>
       </div>
+
+      {/* Breadcrumbs JSON-LD */}
+      <JsonLd id="breadcrumbs-booking" data={breadcrumbBooking} />
     </div>
   );
 }

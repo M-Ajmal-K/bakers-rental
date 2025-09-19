@@ -25,21 +25,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import JsonLd from "@/components/seo/JsonLd";
 
+/* Filters */
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
 const availabilityFilters = ["All", "Available", "Unavailable"] as const;
 type AvailabilityFilter = (typeof availabilityFilters)[number];
 
 type ImagesByVehicle = Record<string, string[]>;
 
-/* Convert DB path -> public URL.
-   Our images.path is usually "vehicle-photos/<key>", but getPublicUrl()
-   expects a key RELATIVE to the bucket. */
+/** Convert DB path -> public URL safely */
 const publicUrlForPath = (path: string) => {
+  if (!path) return "";
   const prefix = `${STORAGE_BUCKET}/`;
   const key = path.startsWith(prefix) ? path.slice(prefix.length) : path;
   return supabase.storage.from(STORAGE_BUCKET).getPublicUrl(key).data.publicUrl;
 };
+
+// SEO constants
+const SITE_URL =
+  (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/+$/, "");
+const CURRENCY = "FJD";
 
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -94,12 +100,12 @@ export default function VehiclesPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxOpen, nextImage, prevImage, closeLightbox]);
 
-  /* ---------------- Load vehicles + override availability for today's bookings ---------------- */
+  /* Load vehicles + override availability for today's bookings */
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
-      // 1) Load vehicles (public) as before
+      // 1) Vehicles
       const { data, error } = await supabase
         .from("vehicles")
         .select(
@@ -115,12 +121,12 @@ export default function VehiclesPage() {
       }
       if (cancelled) return;
 
-      // 2) Resolve images + map to UI model
+      // 2) Images + map
       const baseMapped: Vehicle[] =
         (data || []).map((v: any) => {
           let img: string | null = v.public_url ?? null;
           if (!img && v.image_path) {
-            img = publicUrlForPath(v.image_path);
+            img = publicUrlForPath(v.image_path) || null;
           }
 
           return {
@@ -147,9 +153,8 @@ export default function VehiclesPage() {
         return;
       }
 
-      // 3) Determine "booked today" using server API (service role) to bypass RLS
+      // 3) Unavailable today?
       const todayStr = format(new Date(), "yyyy-MM-dd");
-
       const checks = await Promise.all(
         baseMapped.map(async (v) => {
           try {
@@ -159,12 +164,9 @@ export default function VehiclesPage() {
             );
             const json = await res.json().catch(() => ({}));
             const ranges: Array<{ start: string; end: string }> = json?.ranges || [];
-
-            // Unavailable today if any range covers today's date
             const bookedToday = ranges.some(
               (r) => (r.start as string) <= todayStr && todayStr <= (r.end as string)
             );
-
             return { id: v.id, bookedToday };
           } catch (e) {
             console.warn("[VehiclesPage] availability check failed for", v.id, e);
@@ -177,13 +179,12 @@ export default function VehiclesPage() {
         checks.filter((c) => c.bookedToday).map((c) => String(c.id))
       );
 
-      // 4) Override availability if booked today
       const mapped = baseMapped.map((v) => ({
         ...v,
         available: v.available && !unavailableSet.has(String(v.id)),
       }));
 
-      // 5) Fetch gallery images (non-blocking for card render; swallow RLS issues)
+      // 5) Gallery images
       let grouped: ImagesByVehicle = {};
       try {
         const ids = mapped.map((v) => v.id);
@@ -203,7 +204,7 @@ export default function VehiclesPage() {
               const vid = String(row.vehicle_id);
               const url = publicUrlForPath(row.path);
               if (!acc[vid]) acc[vid] = [];
-              acc[vid].push(url);
+              if (url) acc[vid].push(url);
               return acc;
             }, {});
           }
@@ -224,7 +225,7 @@ export default function VehiclesPage() {
     };
   }, []);
 
-  /* ---------------- Animation on scroll ---------------- */
+  /* Animation on scroll */
   useEffect(() => {
     const handleVisibility = () => {
       const elements = document.querySelectorAll(".fade-in-up");
@@ -238,17 +239,12 @@ export default function VehiclesPage() {
 
     window.addEventListener("scroll", handleVisibility);
     handleVisibility();
-
-    return () => {
-      window.removeEventListener("scroll", handleVisibility);
-    };
+    return () => window.removeEventListener("scroll", handleVisibility);
   }, []);
 
-  /* ---------------- Filtering ---------------- */
+  /* Filtering */
   const filteredVehicles = vehicles
-    .filter(
-      (v) => selectedCategory === "All" || v.category === selectedCategory
-    )
+    .filter((v) => selectedCategory === "All" || v.category === selectedCategory)
     .filter((v) =>
       selectedAvailability === "All"
         ? true
@@ -256,6 +252,72 @@ export default function VehiclesPage() {
         ? v.available
         : !v.available
     );
+
+  /* =========================
+     SEO: JSON-LD (BREADCRUMB + ITEMLIST)
+     ========================= */
+  const breadcrumbVehicles = useMemo(
+    () => ({
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "Home",
+          item: `${SITE_URL}/`,
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Vehicles",
+          item: `${SITE_URL}/vehicles`,
+        },
+      ],
+    }),
+    []
+  );
+
+  const vehicleListJsonLd = useMemo(() => {
+    const elements = filteredVehicles.map((v, idx) => {
+      const images = imagesByVehicle[String(v.id)] ?? [];
+      const primaryImage = images[0] || v.image || `${SITE_URL}/og-image.jpg`;
+
+      return {
+        "@type": "ListItem",
+        position: idx + 1,
+        url: `${SITE_URL}/booking?vehicle=${encodeURIComponent(String(v.id))}`,
+        item: {
+          "@type": "Vehicle",
+          name: v.name,
+          brand: v.brand || undefined,
+          model: v.model || undefined,
+          vehicleModelDate: v.year || undefined,
+          vehicleSeatingCapacity: v.passengers || undefined,
+          fuelType: v.fuel || undefined,
+          vehicleTransmission: v.transmission || undefined,
+          bodyType: v.category || undefined,
+          image: primaryImage,
+          offers: {
+            "@type": "Offer",
+            price: v.pricePerDay ?? undefined,
+            priceCurrency: CURRENCY,
+            availability: v.available
+              ? "https://schema.org/InStock"
+              : "https://schema.org/OutOfStock",
+            url: `${SITE_URL}/booking?vehicle=${encodeURIComponent(String(v.id))}`,
+          },
+        },
+      };
+    });
+
+    return {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      itemListElement: elements,
+      numberOfItems: elements.length,
+    };
+  }, [filteredVehicles, imagesByVehicle]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -276,10 +338,7 @@ export default function VehiclesPage() {
               >
                 Home
               </Link>
-              <Link
-                href="/vehicles"
-                className="text-primary font-medium scale-105"
-              >
+              <Link href="/vehicles" className="text-primary font-medium scale-105">
                 Vehicles
               </Link>
               <Link
@@ -296,7 +355,7 @@ export default function VehiclesPage() {
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="relative py-16 sm:py-20 px-4 overflow-hidden">
         <div className="absolute inset-0 gradient-primary opacity-90" />
         <div className="absolute inset-0 bg-black/20" />
@@ -326,15 +385,13 @@ export default function VehiclesPage() {
                 </Button>
               </div>
 
-              {/* Mobile/desktop: Categories row */}
+              {/* Categories */}
               <div className={`w-full ${showFilters ? "block" : "hidden md:block"}`}>
                 <div className="flex gap-3 overflow-x-auto whitespace-nowrap py-1 -mx-1 px-1">
                   {categories.map((category) => (
                     <Button
                       key={category}
-                      variant={
-                        selectedCategory === category ? "default" : "outline"
-                      }
+                      variant={selectedCategory === category ? "default" : "outline"}
                       size="sm"
                       onClick={() => setSelectedCategory(category)}
                       className={
@@ -349,7 +406,7 @@ export default function VehiclesPage() {
                 </div>
               </div>
 
-              {/* Mobile/desktop: Availability row */}
+              {/* Availability */}
               <div className={`w-full ${showFilters ? "block" : "hidden md:block"}`}>
                 <div className="flex gap-3 overflow-x-auto whitespace-nowrap py-1 -mx-1 px-1">
                   {availabilityFilters.map((a) => (
@@ -381,7 +438,7 @@ export default function VehiclesPage() {
         </div>
       </section>
 
-      {/* Vehicle Cards */}
+      {/* Cards */}
       <section className="py-12 sm:py-20 px-4 bg-gradient-to-b from-background to-muted/10">
         <div className="container mx-auto max-w-6xl">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
@@ -423,7 +480,7 @@ export default function VehiclesPage() {
                         )}
                       </div>
 
-                      {/* Thumbnail strip (only if more than one image) */}
+                      {/* Thumbs */}
                       {thumbs.length > 1 && (
                         <div className="absolute bottom-2 left-2 right-2 flex gap-2 justify-end">
                           {thumbs.map((u, i) => (
@@ -486,17 +543,15 @@ export default function VehiclesPage() {
                           Premium Features:
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          {vehicle.features.slice(0, 3).map(
-                            (feature: string, index: number) => (
-                              <Badge
-                                key={index}
-                                variant="outline"
-                                className="text-[10px] sm:text-xs font-medium border-primary/20 hover:bg-primary/10 transition-colors"
-                              >
-                                {feature}
-                              </Badge>
-                            )
-                          )}
+                          {vehicle.features.slice(0, 3).map((feature: string, index: number) => (
+                            <Badge
+                              key={index}
+                              variant="outline"
+                              className="text-[10px] sm:text-xs font-medium border-primary/20 hover:bg-primary/10 transition-colors"
+                            >
+                              {feature}
+                            </Badge>
+                          ))}
                           {vehicle.features.length > 3 && (
                             <Badge
                               variant="outline"
@@ -659,6 +714,10 @@ export default function VehiclesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* JSON-LD */}
+      <JsonLd id="breadcrumbs-vehicles" data={breadcrumbVehicles} />
+      <JsonLd id="itemlist-vehicles" data={vehicleListJsonLd} />
     </div>
   );
 }
