@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail } from "lucide-react";
+import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail, IdCard } from "lucide-react";
 import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
 
@@ -51,6 +51,9 @@ interface Booking {
   status: BookingStatus | string;
   createdAt: string;
   notes: string;
+
+  // NEW: path stored in DB (private bucket key)
+  licensePath?: string | null;
 }
 
 /* ---------------- Mobile card for bookings (UI unchanged) ----------------- */
@@ -60,6 +63,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
   onEdit,
   onDelete,
   onConfirmed,
+  onViewLicense,
   getStatusBadge,
   calculateDays,
 }: {
@@ -68,6 +72,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
   onEdit: (b: Booking) => void;
   onDelete: (id: string) => void | Promise<void>;
   onConfirmed: (id: string) => void;
+  onViewLicense: (b: Booking) => void;
   getStatusBadge: (s: string) => JSX.Element;
   calculateDays: (a: string, b: string) => number;
 }) {
@@ -79,7 +84,14 @@ const MobileBookingCard = memo(function MobileBookingCard({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm text-white/70">{format(new Date(booking.createdAt), "MMM dd, yyyy")}</p>
-            <h3 className="text-base font-semibold text-white">{booking.bookingRef}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">{booking.bookingRef}</h3>
+              {booking.licensePath ? (
+                <Badge className="bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30">
+                  License
+                </Badge>
+              ) : null}
+            </div>
           </div>
           {getStatusBadge(String(booking.status))}
         </div>
@@ -127,6 +139,19 @@ const MobileBookingCard = memo(function MobileBookingCard({
           >
             <Eye className="h-3.5 w-3.5 mr-1" /> View
           </Button>
+
+          {booking.licensePath ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onViewLicense(booking)}
+              className="h-8 px-3 bg-white/5 hover:bg-white/10 border-white/10 text-white"
+              title="View Driver's License"
+            >
+              <IdCard className="h-3.5 w-3.5 mr-1" /> License
+            </Button>
+          ) : null}
+
           <Button
             variant="outline"
             size="sm"
@@ -168,6 +193,12 @@ function BookingManagementContent() {
   const [editFormData, setEditFormData] = useState({ status: "", notes: "" });
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // NEW: license preview dialog
+  const [isLicenseDialogOpen, setIsLicenseDialogOpen] = useState(false);
+  const [licenseUrl, setLicenseUrl] = useState<string | null>(null);
+  const [licenseLoading, setLicenseLoading] = useState(false);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
 
   useEffect(() => {
     const activate = () => {
@@ -229,6 +260,9 @@ function BookingManagementContent() {
             status: String(r.status ?? "pending").toLowerCase(),
             createdAt: created,
             notes: r.notes ?? "",
+
+            // NEW: carry through the storage object path from DB
+            licensePath: r.license_url ?? null,
           };
         });
 
@@ -329,6 +363,38 @@ function BookingManagementContent() {
 
   const markConfirmed = (id: string) => {
     setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: "confirmed" } : b)));
+  };
+
+  // NEW: open license dialog with signed URL
+  const handleViewLicense = async (booking: Booking) => {
+    if (!booking.licensePath) {
+      alert("No license uploaded for this booking.");
+      return;
+    }
+    setLicenseLoading(true);
+    setLicenseError(null);
+    setIsLicenseDialogOpen(true);
+    setLicenseUrl(null);
+
+    try {
+      const res = await fetch(`/api/admin/bookings/license-url?path=${encodeURIComponent(booking.licensePath)}`, {
+        method: "GET",
+               credentials: "include",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-store" },
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || "Failed to get license URL");
+      }
+      const json = await res.json();
+      setLicenseUrl(json?.url ?? null);
+    } catch (e: any) {
+      console.error("[Admin/Bookings] license preview error:", e);
+      setLicenseError(e?.message || "Could not load license image.");
+    } finally {
+      setLicenseLoading(false);
+    }
   };
 
   return (
@@ -441,6 +507,7 @@ function BookingManagementContent() {
                 onEdit={handleEditBooking}
                 onDelete={handleDeleteBooking}
                 onConfirmed={markConfirmed}
+                onViewLicense={handleViewLicense}
                 getStatusBadge={getStatusBadge}
                 calculateDays={calculateDays}
               />
@@ -488,6 +555,13 @@ function BookingManagementContent() {
                                 <p className="text-sm text-white/70">
                                   {format(new Date(booking.createdAt), "MMM dd, yyyy")}
                                 </p>
+                                {booking.licensePath ? (
+                                  <div className="mt-1">
+                                    <Badge className="bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30">
+                                      License
+                                    </Badge>
+                                  </div>
+                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -523,9 +597,24 @@ function BookingManagementContent() {
                                   size="sm"
                                   onClick={() => handleViewBooking(booking)}
                                   className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                                  title="View booking details"
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
+
+                                {booking.licensePath ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleViewLicense(booking)}
+                                    className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                                    title="View driver's license"
+                                  >
+                                    <IdCard className="h-4 w-4" />
+                                    <span className="sr-only">View License</span>
+                                  </Button>
+                                ) : null}
+
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -669,81 +758,41 @@ function BookingManagementContent() {
             </DialogContent>
           </Dialog>
 
-          {/* Edit dialog */}
-          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          {/* NEW: License viewer dialog */}
+          <Dialog open={isLicenseDialogOpen} onOpenChange={setIsLicenseDialogOpen}>
             <DialogContent
               forceMount
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
-              className="max-w-xl md:max-w-2xl bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 text-white"
+              className="max-w-2xl bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 text-white"
             >
               <DialogHeader>
-                <DialogTitle className="text-white text-xl md:text-2xl">Edit Booking</DialogTitle>
+                <DialogTitle className="text-white text-xl md:text-2xl">Driver’s License</DialogTitle>
               </DialogHeader>
-              {selectedBooking && (
-                <form onSubmit={handleUpdateBooking} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-status" className="text-white/80 font-medium">
-                      Booking Status
-                    </Label>
-                    <Select
-                      value={editFormData.status}
-                      onValueChange={(value) => setEditFormData({ ...editFormData, status: value })}
-                    >
-                      <SelectTrigger className="h-10 md:h-11 bg-white/5 border-white/10 text-white hover:bg-white/10">
-                        <SelectValue placeholder="Choose status" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-900/90 backdrop-blur-xl border-white/10 text-white">
-                        <SelectItem value="pending" className="hover:bg-white/10">
-                          Pending
-                        </SelectItem>
-                        <SelectItem value="confirmed" className="hover:bg-white/10">
-                          Confirmed
-                        </SelectItem>
-                        <SelectItem value="completed" className="hover:bg-white/10">
-                          Completed
-                        </SelectItem>
-                        <SelectItem value="cancelled" className="hover:bg-white/10">
-                          Cancelled
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-notes" className="text-white/80 font-medium">
-                      Notes
-                    </Label>
-                    <Input
-                      id="edit-notes"
-                      placeholder="Add notes about this booking..."
-                      value={editFormData.notes}
-                      onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                      className="h-10 md:h-11 bg-white/5 border-white/10 text-white placeholder:text-white/50"
+              <div className="min-h-[200px] flex items-center justify-center">
+                {licenseLoading && <p className="text-white/70">Loading license…</p>}
+                {!licenseLoading && licenseError && (
+                  <p className="text-red-200 text-sm">{licenseError}</p>
+                )}
+                {!licenseLoading && !licenseError && licenseUrl && (
+                  <div className="w-full">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={licenseUrl}
+                      alt="Driver License"
+                      className="w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
                     />
+                    <div className="mt-3 flex justify-end">
+                      <Button asChild variant="outline" className="bg-white/5 hover:bg-white/10 border-white/10 text-white">
+                        <a href={licenseUrl} target="_blank" rel="noopener">
+                          Open in new tab
+                        </a>
+                      </Button>
+                    </div>
                   </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <Button
-                      type="submit"
-                      className="h-10 md:h-11 px-4 bg-gradient-to-r from-cyan-500 to-fuchsia-500 hover:from-cyan-400 hover:to-fuchsia-400 text-white font-bold shadow-lg shadow-cyan-500/20"
-                    >
-                      Update Booking
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setIsEditDialogOpen(false);
-                        setSelectedBooking(null);
-                      }}
-                      className="h-10 md:h-11 bg-white/5 hover:bg-white/10 border-white/10 text-white"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
-              )}
+                )}
+              </div>
             </DialogContent>
           </Dialog>
         </div>

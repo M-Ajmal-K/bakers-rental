@@ -178,6 +178,9 @@ export default function BookingPage() {
   const [bookingCode, setBookingCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // NEW: driver's license state
+  const [licenseFile, setLicenseFile] = useState<File | null>(null);
+
   // availability state
   const [bookedRanges, setBookedRanges] = useState<BookedRange[]>([]);
   const [loadingAvail, setLoadingAvail] = useState(false);
@@ -457,12 +460,24 @@ export default function BookingPage() {
         total_price: calculateTotal(),
       };
 
-      // ✅ Call server API (uses service-role) instead of client insert (which triggers RLS)
-      const res = await fetch("/api/bookings/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // If a license image is attached, send multipart so the API can upload to Supabase Storage.
+      // Otherwise, keep the existing JSON flow unchanged.
+      let res: Response;
+      if (licenseFile) {
+        const form = new FormData();
+        form.append("payload", JSON.stringify(payload));
+        form.append("license", licenseFile, licenseFile.name);
+        res = await fetch("/api/bookings/create", {
+          method: "POST",
+          body: form,
+        });
+      } else {
+        res = await fetch("/api/bookings/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (!res.ok) {
         const msg = await res.text();
@@ -835,6 +850,14 @@ export default function BookingPage() {
                             <span className="text-muted-foreground">Email:</span>
                             <span className="font-medium">{customerInfo.email}</span>
                           </p>
+                          {licenseFile && (
+                            <p className="flex justify-between">
+                              <span className="text-muted-foreground">License file:</span>
+                              <span className="font-medium truncate max-w-[55%]" title={licenseFile.name}>
+                                {licenseFile.name}
+                              </span>
+                            </p>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -1243,6 +1266,28 @@ export default function BookingPage() {
                           required
                           className="h-11 md:h-12 btn-3d text-sm md:text-base"
                         />
+                      </div>
+
+                      {/* NEW: Driver's License upload */}
+                      <div className="space-y-2.5 md:space-y-3">
+                        <Label htmlFor="license" className="text-sm md:text-base font-medium">
+                          Driver’s License (photo)
+                        </Label>
+                        <Input
+                          id="license"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setLicenseFile(e.target.files?.[0] ?? null)}
+                          className="h-11 md:h-12 btn-3d text-sm md:text-base file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/15"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Accepted: JPG/PNG. You can also share it later via WhatsApp if you prefer.
+                        </p>
+                        {licenseFile && (
+                          <p className="text-xs text-foreground">
+                            Selected: <span className="font-medium">{licenseFile.name}</span>
+                          </p>
+                        )}
                       </div>
 
                       <div className="space-y-2.5 md:space-y-3">
