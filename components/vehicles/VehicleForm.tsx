@@ -19,7 +19,8 @@ import {
   ArrowUp,
   ArrowDown,
   Trash2,
-  Loader2, // spinner
+  Loader2,
+  X, // ← NEW: top-right remove icon
 } from "lucide-react";
 import {
   categories,
@@ -496,6 +497,24 @@ const VehicleForm = memo(function VehicleForm({
                         isPrimary ? "border-primary" : "border-white/15"
                       )}
                     >
+                      {/* NEW: top-right remove "X" */}
+                      <button
+                        type="button"
+                        title="Remove image"
+                        aria-label="Remove image"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          removeAt(actualIndex);
+                        }}
+                        className="absolute top-1.5 right-1.5 z-10 inline-flex items-center justify-center
+                                   h-7 w-7 rounded-full bg-black/60 hover:bg-black/80
+                                   ring-1 ring-white/20 text-white transition"
+                        disabled={submitting}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+
                       <div className="aspect-video bg-black/30">
                         {preview ? (
                           // eslint-disable-next-line @next/next/no-img-element
