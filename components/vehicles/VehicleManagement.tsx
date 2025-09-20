@@ -64,11 +64,22 @@ async function uploadToSupabaseSigned(path: string, token: string, file: File) {
 /** Upload a batch of new images and return their relative storage paths (same order) */
 async function uploadNewImagesAndReturnPaths(newFiles: File[]) {
   const outputs: string[] = [];
-  for (const f of newFiles) {
-    const { path, token } = await getSignedUpload(f);
-    await uploadToSupabaseSigned(path, token, f);
-    outputs.push(path); // store relative key (e.g. "vehicles/uuid_name.jpg")
+
+  // light concurrency to keep UI snappy
+  const concurrency = Math.min(3, newFiles.length || 1);
+  let idx = 0;
+
+  async function worker() {
+    while (idx < newFiles.length) {
+      const current = idx++;
+      const f = newFiles[current];
+      const { path, token } = await getSignedUpload(f);
+      await uploadToSupabaseSigned(path, token, f);
+      outputs[current] = path;
+    }
   }
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
   return outputs;
 }
 
@@ -516,19 +527,13 @@ export default function VehicleManagement() {
         .filter((i) => i.toDelete && i.id)
         .map((i) => String(i.id));
 
-      // NEW files: upload first via signed-upload, then append the **already-uploaded** files to maintain your current API
+      // NEW files: upload first via signed-upload, then append the blobs to match your current update API
       if (newOnes.length > 0) {
         try {
-          const paths = await uploadNewImagesAndReturnPaths(
-            newOnes.map((i) => i.file!)
-          );
-          // keep index mapping so server can keep sort order
-          paths.forEach((_p, idx) => {
-            // we only need to tell the server there are "new files" to register in images table,
-            // but since your current update API expects real File blobs, we’ll still append them.
-            // If you want to fully JSON-ify update too, we can flip it next.
-            const f = newOnes[idx].file!;
-            fd.append("images", f);
+          await uploadNewImagesAndReturnPaths(newOnes.map((i) => i.file!));
+          newOnes.forEach((i) => {
+            // append after uploading so the API still receives files (backward-compatible)
+            if (i.file) fd.append("images", i.file);
           });
         } catch (err: any) {
           console.error("[Vehicles] signed upload (edit) failed:", err);
