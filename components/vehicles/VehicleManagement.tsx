@@ -35,6 +35,43 @@ const getPublicUrl = (path: string) => {
   return supabase.storage.from(STORAGE_BUCKET).getPublicUrl(key).data.publicUrl;
 };
 
+/** Request a signed upload token + storage path from our server */
+async function getSignedUpload(file: File) {
+  const res = await fetch("/api/admin/storage/signed-upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+    }),
+  });
+  const json = await res.json().catch(() => ({} as any));
+  if (!res.ok || !json?.ok || !json?.path || !json?.token) {
+    throw new Error(json?.error || "Failed to get signed upload URL");
+  }
+  return { path: String(json.path), token: String(json.token) };
+}
+
+/** Upload a file using Supabase's signed upload token */
+async function uploadToSupabaseSigned(path: string, token: string, file: File) {
+  const { error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .uploadToSignedUrl(path, token, file);
+  if (error) throw error;
+}
+
+/** Upload a batch of new images and return their relative storage paths (same order) */
+async function uploadNewImagesAndReturnPaths(newFiles: File[]) {
+  const outputs: string[] = [];
+  for (const f of newFiles) {
+    const { path, token } = await getSignedUpload(f);
+    await uploadToSupabaseSigned(path, token, f);
+    outputs.push(path); // store relative key (e.g. "vehicles/uuid_name.jpg")
+  }
+  return outputs;
+}
+
 export default function VehicleManagement() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -259,26 +296,36 @@ export default function VehicleManagement() {
     });
   }, []);
 
-  /* ---------------- Build multipart payloads ---------------- */
-  const appendCommonVehicleFields = (fd: FormData, source: FormState) => {
-    fd.set("registration_number", source.licensePlate);
-    fd.set("title", source.name);
-    fd.set("brand", source.brand);
-    fd.set("model", source.model);
-    fd.set("year", String(parseInt(source.year || "0", 10) || 0));
-    fd.set("rental_price", String(parseFloat(source.pricePerDay || "0") || 0));
+  /* ---------------- Build JSON payload (no big files) ---------------- */
+  const buildVehicleJson = (source: FormState, imagesPayload: any[]) => {
+    return {
+      registration_number: source.licensePlate,
+      title: source.name,
+      brand: source.brand,
+      model: source.model,
+      year: Number.parseInt(source.year || "0", 10) || 0,
+      rental_price: Number.parseFloat(source.pricePerDay || "0") || 0,
+      rental_price_5plus:
+        source.pricePerDay5Plus !== "" && source.pricePerDay5Plus != null
+          ? Number(source.pricePerDay5Plus)
+          : null,
+      rental_price_8plus:
+        source.pricePerDay8Plus !== "" && source.pricePerDay8Plus != null
+          ? Number(source.pricePerDay8Plus)
+          : null,
 
-    if (source.pricePerDay5Plus !== undefined)
-      fd.set("rental_price_5plus", source.pricePerDay5Plus || "");
-    if (source.pricePerDay8Plus !== undefined)
-      fd.set("rental_price_8plus", source.pricePerDay8Plus || "");
+      available: !!source.available,
+      category: source.category || "",
+      passengers: Number.parseInt(source.passengers || "0", 10) || 0,
+      transmission: source.transmission || "",
+      fuel: source.fuel || "",
+      features: source.features
+        ? source.features.split(",").map((f) => f.trim()).filter(Boolean)
+        : [],
 
-    fd.set("available", String(!!source.available));
-    fd.set("category", source.category || "");
-    fd.set("passengers", String(parseInt(source.passengers || "0", 10) || 0));
-    fd.set("transmission", source.transmission || "");
-    fd.set("fuel", source.fuel || "");
-    fd.set("features", source.features || "");
+      // new images array understood by /api/admin/vehicles/create JSON branch
+      images: imagesPayload, // [{ path, is_primary, sort_order }]
+    };
   };
 
   /* ---------------- Add ---------------- */
@@ -296,34 +343,46 @@ export default function VehicleManagement() {
         return;
       }
 
-      const fd = new FormData();
-      appendCommonVehicleFields(fd, formData);
-
+      // 1) Upload any NEW files via signed-upload (direct-to-storage)
       const newFiles = imgs.filter((i) => i.file);
-      newFiles.forEach((img) => {
-        if (img.file) fd.append("images", img.file);
+      let uploadedPaths: string[] = [];
+      if (newFiles.length > 0) {
+        try {
+          uploadedPaths = await uploadNewImagesAndReturnPaths(
+            newFiles.map((i) => i.file!) // all have file
+          );
+        } catch (err: any) {
+          console.error("[Vehicles] signed upload failed:", err);
+          alert(err?.message || "Image upload failed.");
+          return;
+        }
+      }
+
+      // 2) Build the images payload (use returned paths for new files)
+      let newIdx = 0;
+      const imagesPayload = imgs.map((img, idx) => {
+        const path = img.file ? uploadedPaths[newIdx++] : (img.path || "");
+        return {
+          path, // relative key (e.g. "vehicles/uuid_name.jpg")
+          is_primary: !!img.isPrimary,
+          sort_order: typeof img.sortOrder === "number" ? img.sortOrder : idx,
+        };
       });
 
-      // Primary: if a new file is marked primary, send primaryIndex (relative to newFiles)
-      const primaryNewIndex = newFiles.findIndex((i) => i.isPrimary);
-      if (primaryNewIndex >= 0) {
-        fd.set("primaryIndex", String(primaryNewIndex));
+      // Ensure there is exactly one primary
+      if (!imagesPayload.some((p) => p.is_primary)) {
+        imagesPayload[0].is_primary = true;
       }
 
-      // Sort order for new files
-      if (newFiles.length > 0) {
-        const sortNew = newFiles.map((i) =>
-          typeof i.sortOrder === "number" ? i.sortOrder : 0
-        );
-        fd.set("sort", JSON.stringify(sortNew));
-      }
+      // 3) POST JSON to create endpoint (no multipart)
+      const body = buildVehicleJson(formData, imagesPayload);
 
-      // WRITE via server API (service role)
       const res = await fetch("/api/admin/vehicles/create", {
         method: "POST",
         credentials: "include",
         cache: "no-store",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
       const json = await res.json().catch(() => ({} as any));
@@ -423,7 +482,9 @@ export default function VehicleManagement() {
     setIsEditDialogOpen(true);
   };
 
-  /* ---------------- Edit (submit) ---------------- */
+  /* ---------------- Edit (submit)
+     NOTE: This still uses your existing /api/admin/vehicles/update route.
+     If you want to move edit to JSON too, we can switch after create is verified. */
   const handleEditVehicle = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -431,20 +492,50 @@ export default function VehicleManagement() {
 
       const fd = new FormData();
       fd.set("id", String(editingVehicle.id));
-      appendCommonVehicleFields(fd, formData);
+
+      // Common fields
+      fd.set("registration_number", formData.licensePlate);
+      fd.set("title", formData.name);
+      fd.set("brand", formData.brand);
+      fd.set("model", formData.model);
+      fd.set("year", String(parseInt(formData.year || "0", 10) || 0));
+      fd.set("rental_price", String(parseFloat(formData.pricePerDay || "0") || 0));
+      fd.set("rental_price_5plus", formData.pricePerDay5Plus || "");
+      fd.set("rental_price_8plus", formData.pricePerDay8Plus || "");
+      fd.set("available", String(!!formData.available));
+      fd.set("category", formData.category || "");
+      fd.set("passengers", String(parseInt(formData.passengers || "0", 10) || 0));
+      fd.set("transmission", formData.transmission || "");
+      fd.set("fuel", formData.fuel || "");
+      fd.set("features", formData.features || "");
 
       const imgs = formData.images ?? [];
-
       const existing = imgs.filter((i) => i.id && !i.file);
       const newOnes = imgs.filter((i) => i.file && !i.toDelete);
       const toDeleteIds = imgs
         .filter((i) => i.toDelete && i.id)
         .map((i) => String(i.id));
 
-      // attach files
-      newOnes.forEach((img) => {
-        if (img.file) fd.append("images", img.file);
-      });
+      // NEW files: upload first via signed-upload, then append the **already-uploaded** files to maintain your current API
+      if (newOnes.length > 0) {
+        try {
+          const paths = await uploadNewImagesAndReturnPaths(
+            newOnes.map((i) => i.file!)
+          );
+          // keep index mapping so server can keep sort order
+          paths.forEach((_p, idx) => {
+            // we only need to tell the server there are "new files" to register in images table,
+            // but since your current update API expects real File blobs, we’ll still append them.
+            // If you want to fully JSON-ify update too, we can flip it next.
+            const f = newOnes[idx].file!;
+            fd.append("images", f);
+          });
+        } catch (err: any) {
+          console.error("[Vehicles] signed upload (edit) failed:", err);
+          alert(err?.message || "Image upload failed.");
+          return;
+        }
+      }
 
       // primary logic:
       const primaryExisting = existing.find((i) => i.isPrimary && !i.toDelete);

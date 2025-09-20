@@ -113,111 +113,16 @@ export async function POST(req: Request) {
     const sb = admin();
 
     /* ========================= MULTIPART BRANCH ========================= */
+    // Disabled to avoid 413 Payload Too Large on serverless.
     if (isMultipart(req)) {
-      const form = await req.formData();
-
-      // Required
-      const registration_number = str(form.get("registration_number"));
-      const title = str(form.get("title"));
-      const brand = str(form.get("brand"));
-      const model = str(form.get("model"));
-      const year = intOrZero(form.get("year"));
-      const rental_price = numOrNull(form.get("rental_price"));
-
-      if (!registration_number || !title || !brand || !model || rental_price == null) {
-        return NextResponse.json(
-          { ok: false, error: "Missing required fields" },
-          { status: 400 }
-        );
-      }
-
-      // Optional
-      const rental_price_5plus = numOrNull(form.get("rental_price_5plus"));
-      const rental_price_8plus = numOrNull(form.get("rental_price_8plus"));
-      const available = bool(form.get("available"));
-      const category = str(form.get("category"));
-      const passengers = intOrZero(form.get("passengers"));
-      const transmission = str(form.get("transmission"));
-      const fuel = str(form.get("fuel"));
-
-      const featuresRaw = form.get("features");
-      const features = Array.isArray(featuresRaw)
-        ? featuresRaw
-        : str(featuresRaw)
-            .split(",")
-            .map((f) => f.trim())
-            .filter(Boolean);
-
-      // Images from form
-      const files = form.getAll("images").filter((v): v is File => v instanceof File);
-      if (files.length === 0) {
-        // vehicles.image_path is NOT NULL -> enforce at least one image
-        return NextResponse.json(
-          { ok: false, error: "At least one image is required." },
-          { status: 400 }
-        );
-      }
-      const primaryIndexField = form.get("primaryIndex");
-      const primaryIndex =
-        primaryIndexField !== null && primaryIndexField !== undefined
-          ? Number(primaryIndexField)
-          : undefined;
-
-      let sortOrderIndices: number[] | null = null;
-      const sortField = form.get("sort");
-      if (sortField) {
-        try {
-          const arr = JSON.parse(String(sortField));
-          if (Array.isArray(arr)) sortOrderIndices = arr.map((n: any) => Number(n));
-        } catch { /* ignore bad payload */ }
-      }
-
-      // 1) Upload files first, decide primary
-      const uploaded = await uploadFilesFirst(sb, files, primaryIndex, sortOrderIndices);
-      const primary = uploaded.find((u) => u.is_primary) ?? uploaded[0];
-
-      // 2) Insert vehicle with primary image (avoid NOT NULL violation)
-      const vehiclePayload = {
-        registration_number,
-        title,
-        brand,
-        model,
-        year,
-        rental_price,
-        rental_price_5plus,
-        rental_price_8plus,
-        image_path: primary.path,      // relative key
-        public_url: primary.publicUrl, // resolved url
-        available,
-        category,
-        passengers,
-        transmission,
-        fuel,
-        features,
-      };
-
-      const { data: veh, error: vehErr } = await sb
-        .from("vehicles")
-        .insert(vehiclePayload)
-        .select()
-        .single();
-      if (vehErr || !veh) {
-        return NextResponse.json({ ok: false, error: vehErr?.message || "Failed to create vehicle" }, { status: 400 });
-      }
-
-      // 3) Insert images rows
-      const rows = uploaded.map((u) => ({
-        vehicle_id: String(veh.id),
-        path: u.path,             // relative key
-        is_primary: u.is_primary,
-        sort_order: u.sort_order,
-      }));
-      const { error: insErr } = await sb.from("images").insert(rows);
-      if (insErr) {
-        return NextResponse.json({ ok: false, error: insErr.message }, { status: 400 });
-      }
-
-      return NextResponse.json({ ok: true, vehicle: veh });
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Multipart uploads are disabled. Upload images to Supabase Storage first, then POST JSON with image paths.",
+        },
+        { status: 400 }
+      );
     }
 
     /* =========================== JSON BRANCH ============================ */
@@ -238,7 +143,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Images array from client (already uploaded via /api/storage/upload)
+    // Images array from client (already uploaded via Storage)
     const images = Array.isArray(body.images) ? body.images : [];
     // Each item: { path: string (relative), is_primary?: boolean, sort_order?: number }
     let primaryPath: string | null = null;
