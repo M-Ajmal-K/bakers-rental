@@ -186,6 +186,10 @@ export default function BookingPage() {
   const [loadingAvail, setLoadingAvail] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
+  // NEW: control popover open state so calendar closes immediately on date pick
+  const [pickupOpen, setPickupOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+
   /* ---------------- Load real vehicles from Supabase ---------------- */
   useEffect(() => {
     const load = async () => {
@@ -590,7 +594,7 @@ export default function BookingPage() {
                 </div>
                 <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
                   <p className="text-xs text-muted-foreground">Balance on Arrival</p>
-                  <p className="text-lg font-semibold">${balanceDue}</p>
+                  <p className="text-lg font-semibold">${Math.max(totalNow - BOND_FJD, 0)}</p>
                 </div>
               </div>
 
@@ -1014,7 +1018,7 @@ export default function BookingPage() {
                           <Label htmlFor="pickup-date" className="text-sm md:text-base font-medium">
                             Pickup Date
                           </Label>
-                          <Popover>
+                          <Popover open={pickupOpen} onOpenChange={setPickupOpen}>
                             <PopoverTrigger asChild>
                               <Button
                                 variant="outline"
@@ -1035,7 +1039,10 @@ export default function BookingPage() {
                               <Calendar
                                 mode="single"
                                 selected={pickupDate}
-                                onSelect={setPickupDate}
+                                onSelect={(d) => {
+                                  if (d) setPickupDate(d);
+                                  setPickupOpen(false); // 👈 close on pick
+                                }}
                                 disabled={pickupDisabledMatchers}
                                 // visual cross-out, optional but nice
                                 modifiers={{ unavailable: rangeMatchers }}
@@ -1062,7 +1069,7 @@ export default function BookingPage() {
                           <Label htmlFor="return-date" className="text-sm md:text-base font-medium">
                             Return Date
                           </Label>
-                          <Popover>
+                          <Popover open={returnOpen} onOpenChange={setReturnOpen}>
                             <PopoverTrigger asChild>
                               <Button
                                 variant="outline"
@@ -1083,7 +1090,10 @@ export default function BookingPage() {
                               <Calendar
                                 mode="single"
                                 selected={returnDate}
-                                onSelect={setReturnDate}
+                                onSelect={(d) => {
+                                  if (d) setReturnDate(d);
+                                  setReturnOpen(false); // 👈 close on pick
+                                }}
                                 disabled={returnDisabledMatchers}
                                 modifiers={{ unavailable: rangeMatchers }}
                                 modifiersClassNames={{ unavailable: unavailableClass }}
