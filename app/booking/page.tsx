@@ -44,16 +44,7 @@ import JsonLd from "@/components/seo/JsonLd";
 
 /* -------------------------------- Helpers -------------------------------- */
 
-const locations = [
-  "Nadi Airport",
-  "Suva City Center",
-  "Denarau Island",
-  "Coral Coast",
-  "Pacific Harbour",
-  "Lautoka",
-  "Savusavu",
-  "Labasa",
-];
+type ServiceLocation = { name: string; fee_fjd: number };
 
 type BookedRange = { start: Date; end: Date };
 
@@ -139,18 +130,8 @@ const breadcrumbBooking = {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
-    {
-      "@type": "ListItem",
-      position: 1,
-      name: "Home",
-      item: `${SITE_URL}/`,
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      name: "Booking",
-      item: `${SITE_URL}/booking`,
-    },
+    { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_URL}/` },
+    { "@type": "ListItem", position: 2, name: "Booking", item: `${SITE_URL}/booking` },
   ],
 } as const;
 
@@ -164,8 +145,17 @@ export default function BookingPage() {
   const [pickupDate, setPickupDate] = useState<Date>();
   const [returnDate, setReturnDate] = useState<Date>();
   const [selectedVehicle, setSelectedVehicle] = useState(preselectedVehicle || "");
+
+  // Locations managed in DB
+  const [serviceLocations, setServiceLocations] = useState<ServiceLocation[]>([]);
+  const locationNames = useMemo(
+    () => serviceLocations.map((l) => l.name),
+    [serviceLocations]
+  );
+
   const [pickupLocation, setPickupLocation] = useState("");
   const [dropoffLocation, setDropoffLocation] = useState("");
+
   const [customerInfo, setCustomerInfo] = useState({
     name: "",
     phone: "",
@@ -211,11 +201,9 @@ export default function BookingPage() {
           model: "",
           category: v.category ?? "",
           pricePerDay: Number(v.rental_price ?? 0),
-
-          // ✅ tiered prices (optional)
+          // tiered prices (optional)
           pricePerDay5Plus: v.rental_price_5plus != null ? Number(v.rental_price_5plus) : undefined,
           pricePerDay8Plus: v.rental_price_8plus != null ? Number(v.rental_price_8plus) : undefined,
-
           available: Boolean(v.available),
           passengers: 0,
           transmission: "",
@@ -231,6 +219,27 @@ export default function BookingPage() {
     };
 
     load();
+  }, []);
+
+  /* ---------------- Load service locations from Supabase ---------------- */
+  useEffect(() => {
+    const loadLocations = async () => {
+      const { data, error } = await supabase
+        .from("service_locations")
+        .select("name, fee_fjd")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error("[BookingPage] fetch locations error:", error);
+        setServiceLocations([]);
+        return;
+      }
+      setServiceLocations((data || []).map((r: any) => ({ name: r.name, fee_fjd: Number(r.fee_fjd || 0) })));
+    };
+
+    loadLocations();
   }, []);
 
   /* ---------------- Animation on scroll (keep your effect) ---------------- */
@@ -261,7 +270,6 @@ export default function BookingPage() {
 
       setLoadingAvail(true);
       try {
-        // Use secure server API (blocks CONFIRMED and recent PENDING holds)
         const res = await fetch(`/api/availability/${selectedVehicle}?includePending=1`);
         if (!res.ok) {
           const msg = await res.text();
@@ -313,13 +321,11 @@ export default function BookingPage() {
   /* ---------------- Calendar disabled + cross-out helpers ---------------- */
   const todayStart = atStartOfDay(new Date());
 
-  // Build DayPicker "matchers" for the booked ranges (for both styling and disabling)
   const rangeMatchers = useMemo(
     () => bookedRanges.map((r) => ({ from: r.start, to: r.end })),
     [bookedRanges]
   );
 
-  // Use DayPicker's native disabled matchers instead of callback functions
   const pickupDisabledMatchers = useMemo(
     () => [{ before: todayStart }, ...rangeMatchers],
     [todayStart, rangeMatchers]
@@ -330,11 +336,10 @@ export default function BookingPage() {
     [pickupDate, todayStart, rangeMatchers]
   );
 
-  // Class to visually cross booked days (typo fixed for after:-translate-y-1/2)
   const unavailableClass =
     "relative opacity-60 " +
     "before:content-[''] before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:-translate-y-1/2 before:bg-red-500/70 before:rotate-[-18deg] " +
-    "after:content-[''] after:absolute after:left-1 after:right-1 after:top-1/2 after:h-[2px] after:-translate-y-1/2 after:bg-red-500/70 after:rotate-[18deg]";
+    "after:content-[''] after:absolute after:left-1 after:right-1 after:top-1/2 after:h-[2px] before:-translate-y-1/2 after:bg-red-500/70 after:rotate-[18deg]";
 
   /* ---------------- Price helpers (tiered) ---------------- */
 
@@ -347,18 +352,17 @@ export default function BookingPage() {
     return 1;
   };
 
-  // 👉 Applies single-tier rate to *all* days once threshold is met
+  // Applies single-tier rate to *all* days once threshold is met
   const calculateTieredTotal = (v: Vehicle, days: number) => {
     const base = v.pricePerDay;
     const rate5 = v.pricePerDay5Plus ?? base; // fallback if not set
     const rate8 = v.pricePerDay8Plus ?? rate5; // fallback if not set
 
-    if (days <= 4) return days * base;   // base price only for ≤4 days
-    if (days <= 7) return days * rate5;  // 5–7 days -> tier price × all days
-    return days * rate8;                 // 8+ days -> higher tier × all days
+    if (days <= 4) return days * base;
+    if (days <= 7) return days * rate5;
+    return days * rate8;
   };
 
-  // 👉 Breakdown reflects the single-tier pricing across all days
   const breakdownText = (v: Vehicle, days: number) => {
     const base = v.pricePerDay;
     const rate5 = v.pricePerDay5Plus ?? base;
@@ -371,14 +375,23 @@ export default function BookingPage() {
     return `${days} × $${rate}`;
   };
 
+  /** Location fee helpers (from DB) */
+  const feeFor = useMemo(() => {
+    const map = new Map(serviceLocations.map((l) => [l.name, l.fee_fjd]));
+    return (name: string) => (name ? Number(map.get(name) || 0) : 0);
+  }, [serviceLocations]);
+
+  const pickupFee = useMemo(() => feeFor(pickupLocation), [feeFor, pickupLocation]);
+  const dropoffFee = useMemo(() => feeFor(dropoffLocation), [feeFor, dropoffLocation]);
+  const locationFeesTotal = pickupFee + dropoffFee;
+
+  /** Grand total (vehicle + location fees) */
   const calculateTotal = () => {
-    if (selectedVehicleData) {
-      return calculateTieredTotal(selectedVehicleData, calculateDays());
-    }
-    return 0;
+    const vehicleSubtotal = selectedVehicleData ? calculateTieredTotal(selectedVehicleData, calculateDays()) : 0;
+    return vehicleSubtotal + locationFeesTotal;
   };
 
-  // 🔥 Live "current tier" info used across UI (dates & summary)
+  // Live "current tier" info
   const currentTier = useMemo(() => {
     if (!selectedVehicleData) return null;
     const days = calculateDays();
@@ -425,9 +438,7 @@ export default function BookingPage() {
     ) {
       const overlaps = bookedRanges.some((r) => rangesOverlap(pickupDate, returnDate, r));
       if (overlaps) {
-        alert(
-          "The dates you selected overlap an existing booking for this vehicle. Please choose a different period."
-        );
+        alert("The dates you selected overlap an existing booking for this vehicle. Please choose a different period.");
         return;
       }
       setShowSummary(true);
@@ -442,16 +453,17 @@ export default function BookingPage() {
 
     const overlaps = bookedRanges.some((r) => rangesOverlap(pickupDate, returnDate, r));
     if (overlaps) {
-      alert(
-        "The dates you selected now overlap an existing booking. Please go back and adjust your dates."
-      );
+      alert("The dates you selected now overlap an existing booking. Please go back and adjust your dates.");
       return;
     }
+
+    // 🚩 Send vehicle-only subtotal; API will add pickup+dropoff fees from DB
+    const vehicleSubtotal =
+      selectedVehicleData ? calculateTieredTotal(selectedVehicleData, calculateDays()) : 0;
 
     setConfirming(true);
     setErrorMsg(null);
     try {
-      // Build payload using YOUR real column names
       const payload = {
         vehicle_id: selectedVehicle,
         start_date: format(atStartOfDay(pickupDate), "yyyy-MM-dd"),
@@ -461,20 +473,15 @@ export default function BookingPage() {
         customer_name: customerInfo.name,
         contact_number: customerInfo.phone,
         email: customerInfo.email,
-        total_price: calculateTotal(),
+        total_price: vehicleSubtotal, // <-- vehicle-only; server computes final total
       };
 
-      // If a license image is attached, send multipart so the API can upload to Supabase Storage.
-      // Otherwise, keep the existing JSON flow unchanged.
       let res: Response;
       if (licenseFile) {
         const form = new FormData();
         form.append("payload", JSON.stringify(payload));
         form.append("license", licenseFile, licenseFile.name);
-        res = await fetch("/api/bookings/create", {
-          method: "POST",
-          body: form,
-        });
+        res = await fetch("/api/bookings/create", { method: "POST", body: form });
       } else {
         res = await fetch("/api/bookings/create", {
           method: "POST",
@@ -490,10 +497,10 @@ export default function BookingPage() {
         return;
       }
 
-      const data = await res.json(); // { id, code, status }
+      const data = await res.json(); // { id, code, status, total_price, pickup_fee_fjd, dropoff_fee_fjd }
       setBookingCode(data?.code ?? null);
       setShowSuccess(true);
-      setShowPayment(true); // show payment dialog immediately
+      setShowPayment(true);
     } catch (err: any) {
       console.error("[BookingPage] create API error:", err);
       setErrorMsg(err?.message || "Failed to confirm booking. Please try again.");
@@ -509,7 +516,7 @@ export default function BookingPage() {
     )}`;
 
     // bond math for dialog
-    const totalNow = calculateTotal();
+    const totalNow = calculateTotal(); // includes location fees
     const balanceDue = Math.max(totalNow - BOND_FJD, 0);
 
     return (
@@ -519,12 +526,12 @@ export default function BookingPage() {
           <DialogContent
             className={cn(
               "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl",
-              "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
+              "max-h[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
               "p-0 overflow-hidden rounded-2xl border-0 flex flex-col",
               "shadow-[0_20px_60px_-10px_rgba(0,0,0,0.5)]"
             )}
           >
-            {/* Top bar to match theme */}
+            {/* Top bar */}
             <div className="relative overflow-hidden flex-shrink-0">
               <div className="gradient-primary h-20 sm:h-24 w-full" />
               <div className="absolute inset-0 bg-black/10" />
@@ -534,9 +541,7 @@ export default function BookingPage() {
                     <Wallet className="h-6 w-6 text-white" />
                   </div>
                   <div>
-                    <DialogTitle className="text-white text-base sm:text-lg">
-                      Payment Instructions
-                    </DialogTitle>
+                    <DialogTitle className="text-white text-base sm:text-lg">Payment Instructions</DialogTitle>
                     <DialogDescription className="text-white/80 text-xs sm:text-sm">
                       Choose your preferred method below. Send your receipt & booking code via WhatsApp.
                     </DialogDescription>
@@ -554,7 +559,7 @@ export default function BookingPage() {
               </div>
             </div>
 
-            {/* 🔔 Bond notice */}
+            {/* Bond notice */}
             <div className="px-4 sm:px-6 pt-4">
               <div className="rounded-xl bg-green-600/10 border border-green-500/30 p-3 sm:p-4 flex items-start gap-3">
                 <div className="mt-0.5">
@@ -564,9 +569,7 @@ export default function BookingPage() {
                   <p className="font-semibold text-foreground">
                     Pay only the refundable bond: <span className="font-bold">$ {BOND_FJD} FJD</span>.
                   </p>
-                  <p className="text-muted-foreground">
-                    The rental balance is paid on arrival.
-                  </p>
+                  <p className="text-muted-foreground">The rental balance is paid on arrival.</p>
                 </div>
               </div>
             </div>
@@ -603,9 +606,7 @@ export default function BookingPage() {
                 <div className="p-4 sm:p-5">
                   <div className="flex items-center gap-2 mb-3 sm:mb-4">
                     <Landmark className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-                    <h3 className="text-sm sm:text-base font-semibold text-foreground">
-                      Direct Bank Transfer
-                    </h3>
+                    <h3 className="text-sm sm:text-base font-semibold text-foreground">Direct Bank Transfer</h3>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
                     <InfoBox label="Account Name" value={BANK.accountName} />
@@ -695,7 +696,7 @@ export default function BookingPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Success card (your original styling kept) */}
+        {/* Success card */}
         <div className="text-center fade-in-up animate px-4">
           <div className="relative mb-6 md:mb-8">
             <div className="w-24 h-24 md:w-32 md:h-32 gradient-primary rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 animate-bounce">
@@ -735,8 +736,9 @@ export default function BookingPage() {
   if (showSummary) {
     const days = calculateDays();
     const breakdown = selectedVehicleData ? breakdownText(selectedVehicleData, days) : "";
-    const total = calculateTotal();
+    const total = calculateTotal(); // includes location fees
     const balanceDue = Math.max(total - BOND_FJD, 0);
+    const vehicleSubtotal = selectedVehicleData ? calculateTieredTotal(selectedVehicleData, days) : 0;
 
     return (
       <div className="min-h-screen bg-background">
@@ -806,7 +808,7 @@ export default function BookingPage() {
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Duration:</span>
-                            <span className="font-bold text-secondary">
+                            <span className="text-secondary font-bold">
                               {days} day{days !== 1 ? "s" : ""}
                             </span>
                           </p>
@@ -825,11 +827,15 @@ export default function BookingPage() {
                         <div className="space-y-2 md:space-y-3 text-sm md:text-base">
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Pickup:</span>
-                            <span className="font-medium">{pickupLocation}</span>
+                            <span className="font-medium">
+                              {pickupLocation} {pickupLocation ? `(+$${pickupFee})` : ""}
+                            </span>
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Drop-off:</span>
-                            <span className="font-medium">{dropoffLocation}</span>
+                            <span className="font-medium">
+                              {dropoffLocation} {dropoffLocation ? `(+$${dropoffFee})` : ""}
+                            </span>
                           </p>
                         </div>
                       </CardContent>
@@ -842,24 +848,13 @@ export default function BookingPage() {
                           Customer Details
                         </h3>
                         <div className="space-y-2 md:space-y-3 text-sm md:text-base">
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Name:</span>
-                            <span className="font-medium">{customerInfo.name}</span>
-                          </p>
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Phone:</span>
-                            <span className="font-medium">{customerInfo.phone}</span>
-                          </p>
-                          <p className="flex justify-between">
-                            <span className="text-muted-foreground">Email:</span>
-                            <span className="font-medium">{customerInfo.email}</span>
-                          </p>
+                          <p className="flex justify-between"><span className="text-muted-foreground">Name:</span><span className="font-medium">{customerInfo.name}</span></p>
+                          <p className="flex justify-between"><span className="text-muted-foreground">Phone:</span><span className="font-medium">{customerInfo.phone}</span></p>
+                          <p className="flex justify-between"><span className="text-muted-foreground">Email:</span><span className="font-medium">{customerInfo.email}</span></p>
                           {licenseFile && (
                             <p className="flex justify-between">
                               <span className="text-muted-foreground">License file:</span>
-                              <span className="font-medium truncate max-w-[55%]" title={licenseFile.name}>
-                                {licenseFile.name}
-                              </span>
+                              <span className="font-medium truncate max-w-[55%]" title={licenseFile.name}>{licenseFile.name}</span>
                             </p>
                           )}
                         </div>
@@ -876,9 +871,25 @@ export default function BookingPage() {
                     </Card>
                   )}
 
+                  {/* Totals with fees */}
                   <Card className="border-0 bg-gradient-to-r from-primary to-secondary">
                     <CardContent className="p-4 md:pb-6 text-center space-y-2">
-                      <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-white/95 text-sm">
+                        <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
+                          <span>Vehicle subtotal</span>
+                          <span className="font-semibold">${vehicleSubtotal}</span>
+                        </div>
+                        <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
+                          <span>Pickup fee</span>
+                          <span className="font-semibold">${pickupFee}</span>
+                        </div>
+                        <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
+                          <span>Drop-off fee</span>
+                          <span className="font-semibold">${dropoffFee}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white mt-2">
                         <span>Total Amount:</span>
                         <span>${total}</span>
                       </div>
@@ -895,9 +906,7 @@ export default function BookingPage() {
 
                       {currentTier && (
                         <>
-                          <p className="text-white/85 text-xs md:text-sm">
-                            {currentTier.breakdown}
-                          </p>
+                          <p className="text-white/85 text-xs md:text-sm">{currentTier.breakdown}</p>
                           <p className="text-white/85 text-xs md:text-sm">
                             Current tier: <span className="font-semibold">{currentTier.label}</span> — ${currentTier.rate}/day
                           </p>
@@ -906,9 +915,7 @@ export default function BookingPage() {
                     </CardContent>
                   </Card>
 
-                  {errorMsg && (
-                    <p className="text-red-600 text-center text-sm md:text-base">{errorMsg}</p>
-                  )}
+                  {errorMsg && <p className="text-red-600 text-center text-sm md:text-base">{errorMsg}</p>}
 
                   <div className="flex gap-3 md:gap-4 pt-2 md:pt-4">
                     <Button
@@ -953,10 +960,7 @@ export default function BookingPage() {
               <Link href="/" className="text-foreground hover:text-primary transition-all duration-300 hover:scale-105">
                 Home
               </Link>
-              <Link
-                href="/vehicles"
-                className="text-foreground hover:text-primary transition-all duration-300 hover:scale-105"
-              >
+              <Link href="/vehicles" className="text-foreground hover:text-primary transition-all duration-300 hover:scale-105">
                 Vehicles
               </Link>
               <Link href="/booking" className="text-primary font-medium scale-105">
@@ -975,14 +979,8 @@ export default function BookingPage() {
         <div className="absolute inset-0 bg-black/20" />
 
         {/* Floating animation elements - hide on mobile */}
-        <div
-          className="hidden sm:block absolute top-10 left-10 w-16 h-16 bg-white/10 rounded-full blur-xl animate-bounce"
-          style={{ animationDelay: "0s", animationDuration: "3s" }}
-        />
-        <div
-          className="hidden sm:block absolute top-20 right-20 w-12 h-12 bg-white/10 rounded-full blur-xl animate-bounce"
-          style={{ animationDelay: "1s", animationDuration: "4s" }}
-        />
+        <div className="hidden sm:block absolute top-10 left-10 w-16 h-16 bg-white/10 rounded-full blur-xl animate-bounce" style={{ animationDelay: "0s", animationDuration: "3s" }} />
+        <div className="hidden sm:block absolute top-20 right-20 w-12 h-12 bg-white/10 rounded-full blur-xl animate-bounce" style={{ animationDelay: "1s", animationDuration: "4s" }} />
 
         <div className="relative z-10 container mx-auto max-w-3xl md:max-w-4xl">
           <div className="fade-in-up text-center">
@@ -1002,6 +1000,7 @@ export default function BookingPage() {
           <form id="booking-form" onSubmit={handleSubmit} className="space-y-6 md:space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
               <div className="lg:col-span-2 space-y-6 md:space-y-8">
+                {/* Dates */}
                 <div className="fade-in-up" style={{ animationDelay: "0.1s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1014,10 +1013,9 @@ export default function BookingPage() {
                     </CardHeader>
                     <CardContent className="space-y-5 md:space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
+                        {/* Pickup date */}
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="pickup-date" className="text-sm md:text-base font-medium">
-                            Pickup Date
-                          </Label>
+                          <Label htmlFor="pickup-date" className="text-sm md:text-base font-medium">Pickup Date</Label>
                           <Popover open={pickupOpen} onOpenChange={setPickupOpen}>
                             <PopoverTrigger asChild>
                               <Button
@@ -1031,20 +1029,12 @@ export default function BookingPage() {
                                 {pickupDate ? format(pickupDate, "PPP") : "Select pickup date"}
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[calc(100vw-2rem)] sm:w-auto p-0"
-                              align="start"
-                              sideOffset={8}
-                            >
+                            <PopoverContent className="w-[calc(100vw-2rem)] sm:w-auto p-0" align="start" sideOffset={8}>
                               <Calendar
                                 mode="single"
                                 selected={pickupDate}
-                                onSelect={(d) => {
-                                  if (d) setPickupDate(d);
-                                  setPickupOpen(false); // 👈 close on pick
-                                }}
+                                onSelect={(d) => { if (d) setPickupDate(d); setPickupOpen(false); }}
                                 disabled={pickupDisabledMatchers}
-                                // visual cross-out, optional but nice
                                 modifiers={{ unavailable: rangeMatchers }}
                                 modifiersClassNames={{ unavailable: unavailableClass }}
                                 initialFocus
@@ -1056,19 +1046,15 @@ export default function BookingPage() {
                               {loadingAvail
                                 ? "Checking availability…"
                                 : bookedRanges.length > 0
-                                ? `Note: Some dates are unavailable for this vehicle. Next available from ${format(
-                                    nextAvailableFrom,
-                                    "PPP",
-                                  )}.`
+                                ? `Note: Some dates are unavailable for this vehicle. Next available from ${format(nextAvailableFrom, "PPP")}.`
                                 : "Great news: this vehicle has no blocked dates ahead."}
                             </p>
                           )}
                         </div>
 
+                        {/* Return date */}
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="return-date" className="text-sm md:text-base font-medium">
-                            Return Date
-                          </Label>
+                          <Label htmlFor="return-date" className="text-sm md:text-base font-medium">Return Date</Label>
                           <Popover open={returnOpen} onOpenChange={setReturnOpen}>
                             <PopoverTrigger asChild>
                               <Button
@@ -1082,18 +1068,11 @@ export default function BookingPage() {
                                 {returnDate ? format(returnDate, "PPP") : "Select return date"}
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent
-                              className="w-[calc(100vw-2rem)] sm:w-auto p-0"
-                              align="start"
-                              sideOffset={8}
-                            >
+                            <PopoverContent className="w-[calc(100vw-2rem)] sm:w-auto p-0" align="start" sideOffset={8}>
                               <Calendar
                                 mode="single"
                                 selected={returnDate}
-                                onSelect={(d) => {
-                                  if (d) setReturnDate(d);
-                                  setReturnOpen(false); // 👈 close on pick
-                                }}
+                                onSelect={(d) => { if (d) setReturnDate(d); setReturnOpen(false); }}
                                 disabled={returnDisabledMatchers}
                                 modifiers={{ unavailable: rangeMatchers }}
                                 modifiersClassNames={{ unavailable: unavailableClass }}
@@ -1104,7 +1083,7 @@ export default function BookingPage() {
                         </div>
                       </div>
 
-                      {/* ▼ Tier prices + current tier note */}
+                      {/* Tier prices + current tier note */}
                       {selectedVehicleData && currentTier && (
                         <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs md:text-sm">
                           <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
@@ -1127,9 +1106,7 @@ export default function BookingPage() {
                           <div className="sm:col-span-3 rounded-lg bg-primary/10 border border-primary/30 p-2.5">
                             <p className="text-xs md:text-sm text-primary font-medium">
                               Current tier: <span className="font-bold">{currentTier.label}</span> — ${currentTier.rate}/day
-                              {currentTier.days > 0 && (
-                                <> (for your {currentTier.days} day{currentTier.days !== 1 ? "s" : ""} selection)</>
-                              )}
+                              {currentTier.days > 0 && <> (for your {currentTier.days} day{currentTier.days !== 1 ? "s" : ""} selection)</>}
                             </p>
                           </div>
                         </div>
@@ -1138,6 +1115,7 @@ export default function BookingPage() {
                   </Card>
                 </div>
 
+                {/* Vehicle selection */}
                 <div className="fade-in-up" style={{ animationDelay: "0.2s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1150,9 +1128,7 @@ export default function BookingPage() {
                     </CardHeader>
                     <CardContent className="pt-0 md:pt-2">
                       <div className="space-y-2.5 md:space-y-3">
-                        <Label htmlFor="vehicle" className="text-sm md:text-base font-medium">
-                          Choose Your Perfect Vehicle
-                        </Label>
+                        <Label htmlFor="vehicle" className="text-sm md:text-base font-medium">Choose Your Perfect Vehicle</Label>
                         <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
                           <SelectTrigger className="h-11 md:h-12 btn-3d text-sm md:text-base">
                             <SelectValue placeholder="Select a vehicle from our premium fleet" />
@@ -1170,6 +1146,7 @@ export default function BookingPage() {
                   </Card>
                 </div>
 
+                {/* Pickup & Drop-off */}
                 <div className="fade-in-up" style={{ animationDelay: "0.3s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1183,37 +1160,39 @@ export default function BookingPage() {
                     <CardContent className="space-y-5 md:space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="pickup-location" className="text-sm md:text-base font-medium">
-                            Pickup Location
-                          </Label>
+                          <Label htmlFor="pickup-location" className="text-sm md:text-base font-medium">Pickup Location</Label>
                           <Select value={pickupLocation} onValueChange={setPickupLocation}>
                             <SelectTrigger className="h-11 md:h-12 btn-3d text-sm md:text-base">
                               <SelectValue placeholder="Select pickup location" />
                             </SelectTrigger>
                             <SelectContent className="max-h-[60vh]">
-                              {locations.map((location) => (
-                                <SelectItem key={location} value={location}>
-                                  {location}
-                                </SelectItem>
-                              ))}
+                              {locationNames.map((location) => {
+                                const fee = feeFor(location);
+                                return (
+                                  <SelectItem key={location} value={location}>
+                                    {location} {fee ? `(+$${fee})` : "(Free)"}
+                                  </SelectItem>
+                                );
+                              })}
                             </SelectContent>
                           </Select>
                         </div>
 
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="dropoff-location" className="text-sm md:text-base font-medium">
-                            Drop-off Location
-                          </Label>
+                          <Label htmlFor="dropoff-location" className="text-sm md:text-base font-medium">Drop-off Location</Label>
                           <Select value={dropoffLocation} onValueChange={setDropoffLocation}>
                             <SelectTrigger className="h-11 md:h-12 btn-3d text-sm md:text-base">
                               <SelectValue placeholder="Select drop-off location" />
                             </SelectTrigger>
                             <SelectContent className="max-h-[60vh]">
-                              {locations.map((location) => (
-                                <SelectItem key={location} value={location}>
-                                  {location}
-                                </SelectItem>
-                              ))}
+                              {locationNames.map((location) => {
+                                const fee = feeFor(location);
+                                return (
+                                  <SelectItem key={location} value={location}>
+                                    {location} {fee ? `(+$${fee})` : "(Free)"}
+                                  </SelectItem>
+                                );
+                              })}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1222,6 +1201,7 @@ export default function BookingPage() {
                   </Card>
                 </div>
 
+                {/* Customer info */}
                 <div className="fade-in-up" style={{ animationDelay: "0.4s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1235,83 +1215,31 @@ export default function BookingPage() {
                     <CardContent className="space-y-5 md:space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="name" className="text-sm md:text-base font-medium">
-                            Full Name
-                          </Label>
-                          <Input
-                            id="name"
-                            placeholder="Enter your full name"
-                            value={customerInfo.name}
-                            onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })}
-                            required
-                            className="h-11 md:h-12 btn-3d text-sm md:text-base"
-                          />
+                          <Label htmlFor="name" className="text-sm md:text-base font-medium">Full Name</Label>
+                          <Input id="name" placeholder="Enter your full name" value={customerInfo.name} onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })} required className="h-11 md:h-12 btn-3d text-sm md:text-base" />
                         </div>
-
                         <div className="space-y-2.5 md:space-y-3">
-                          <Label htmlFor="phone" className="text-sm md:text-base font-medium">
-                            Phone Number
-                          </Label>
-                          <Input
-                            id="phone"
-                            placeholder="+679 123 4567"
-                            value={customerInfo.phone}
-                            onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
-                            required
-                            className="h-11 md:h-12 btn-3d text-sm md:text-base"
-                          />
+                          <Label htmlFor="phone" className="text-sm md:text-base font-medium">Phone Number</Label>
+                          <Input id="phone" placeholder="+679 123 4567" value={customerInfo.phone} onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })} required className="h-11 md:h-12 btn-3d text-sm md:text-base" />
                         </div>
                       </div>
 
                       <div className="space-y-2.5 md:space-y-3">
-                        <Label htmlFor="email" className="text-sm md:text-base font-medium">
-                          Email Address
-                        </Label>
-                        <Input
-                          id="email"
-                          type="email"
-                          placeholder="your.email@example.com"
-                          value={customerInfo.email}
-                          onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })}
-                          required
-                          className="h-11 md:h-12 btn-3d text-sm md:text-base"
-                        />
+                        <Label htmlFor="email" className="text-sm md:text-base font-medium">Email Address</Label>
+                        <Input id="email" type="email" placeholder="your.email@example.com" value={customerInfo.email} onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })} required className="h-11 md:h-12 btn-3d text-sm md:text-base" />
                       </div>
 
-                      {/* NEW: Driver's License upload */}
+                      {/* Driver's License upload */}
                       <div className="space-y-2.5 md:space-y-3">
-                        <Label htmlFor="license" className="text-sm md:text-base font-medium">
-                          Driver’s License (photo)
-                        </Label>
-                        <Input
-                          id="license"
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => setLicenseFile(e.target.files?.[0] ?? null)}
-                          className="h-11 md:h-12 btn-3d text-sm md:text-base file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/15"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Accepted: JPG/PNG. You can also share it later via WhatsApp if you prefer.
-                        </p>
-                        {licenseFile && (
-                          <p className="text-xs text-foreground">
-                            Selected: <span className="font-medium">{licenseFile.name}</span>
-                          </p>
-                        )}
+                        <Label htmlFor="license" className="text-sm md:text-base font-medium">Driver’s License (photo)</Label>
+                        <Input id="license" type="file" accept="image/*" onChange={(e) => setLicenseFile(e.target.files?.[0] ?? null)} className="h-11 md:h-12 btn-3d text-sm md:text-base file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/15" />
+                        <p className="text-xs text-muted-foreground">Accepted: JPG/PNG. You can also share it later via WhatsApp if you prefer.</p>
+                        {licenseFile && <p className="text-xs text-foreground">Selected: <span className="font-medium">{licenseFile.name}</span></p>}
                       </div>
 
                       <div className="space-y-2.5 md:space-y-3">
-                        <Label htmlFor="notes" className="text-sm md:text-base font-medium">
-                          Special Requests (Optional)
-                        </Label>
-                        <Textarea
-                          id="notes"
-                          placeholder="Any special requests or notes for your rental..."
-                          value={customerInfo.notes}
-                          onChange={(e) => setCustomerInfo({ ...customerInfo, notes: e.target.value })}
-                          rows={4}
-                          className="btn-3d resize-none text-sm md:text-base"
-                        />
+                        <Label htmlFor="notes" className="text-sm md:text-base font-medium">Special Requests (Optional)</Label>
+                        <Textarea id="notes" placeholder="Any special requests or notes for your rental..." value={customerInfo.notes} onChange={(e) => setCustomerInfo({ ...customerInfo, notes: e.target.value })} rows={4} className="btn-3d resize-none text-sm md:text-base" />
                       </div>
                     </CardContent>
                   </Card>
@@ -1330,17 +1258,13 @@ export default function BookingPage() {
                         <>
                           <div className="text-center">
                             <h4 className="text-lg md:text-xl font-bold text-foreground">{selectedVehicleData.name}</h4>
-                            <p className="text-muted-foreground font-medium text-sm md:text-base">
-                              {selectedVehicleData.category}
-                            </p>
+                            <p className="text-muted-foreground font-medium text-sm md:text-base">{selectedVehicleData.category}</p>
                           </div>
 
                           <div className="space-y-3 md:space-y-4">
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Current Daily Rate:</span>
-                              <span className="font-bold text-primary">
-                                {currentTier ? `$${currentTier.rate}` : `$${selectedVehicleData.pricePerDay}`}
-                              </span>
+                              <span className="font-bold text-primary">{currentTier ? `$${currentTier.rate}` : `$${selectedVehicleData.pricePerDay}`}</span>
                             </div>
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Duration:</span>
@@ -1348,12 +1272,25 @@ export default function BookingPage() {
                                 {currentTier ? currentTier.days : calculateDays()} day{(currentTier ? currentTier.days : calculateDays()) !== 1 ? "s" : ""}
                               </span>
                             </div>
-                            {currentTier?.breakdown && (
-                              <div className="p-3 bg-card/50 rounded-lg text-xs md:text-sm text-muted-foreground">
-                                <span className="block">Breakdown:</span>
-                                <span className="font-mono text-foreground">{currentTier.breakdown}</span>
+
+                            {/* Fees breakdown */}
+                            <div className="p-3 bg-card/50 rounded-lg text-xs md:text-sm text-foreground space-y-2">
+                              {currentTier?.breakdown && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Vehicle subtotal:</span>
+                                  <span className="font-mono">${selectedVehicleData ? calculateTieredTotal(selectedVehicleData, currentTier.days) : 0}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Pickup fee:</span>
+                                <span className="font-mono">${pickupFee}</span>
                               </div>
-                            )}
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Drop-off fee:</span>
+                                <span className="font-mono">${dropoffFee}</span>
+                              </div>
+                            </div>
+
                             <div className="flex justify-between items-center p-4 gradient-primary rounded-lg text-white">
                               <span className="text-base md:text-lg font-bold">Total:</span>
                               <span className="text-xl md:text-2xl font-bold">${calculateTotal()}</span>
@@ -1363,9 +1300,7 @@ export default function BookingPage() {
                       ) : (
                         <div className="text-center py-8">
                           <Car className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground mx-auto mb-3 md:mb-4" />
-                          <p className="text-muted-foreground text-sm md:text-base">
-                            Select a vehicle to see pricing details
-                          </p>
+                          <p className="text-muted-foreground text-sm md:text-base">Select a vehicle to see pricing details</p>
                         </div>
                       )}
 

@@ -39,6 +39,10 @@ type Payload = {
   customer_name: string;
   contact_number: string;
   email: string;
+  /**
+   * Vehicle-only subtotal coming from the client UI (without location fees).
+   * If client sends grand total by mistake, we still overwrite with our final calc.
+   */
   total_price?: number | null;
 };
 
@@ -94,7 +98,7 @@ export async function POST(req: Request) {
     customer_name,
     contact_number,
     email,
-    total_price = null,
+    total_price = 0, // treat as vehicle-only subtotal
   } = body || ({} as Payload);
 
   // minimal validation
@@ -111,20 +115,59 @@ export async function POST(req: Request) {
     return new NextResponse("Missing required fields", { status: 400 });
   }
 
-  // generate a mostly-unique booking code (you can replace this with DB default/sequence if preferred)
+  // ---- Look up fees from service_locations (case-insensitive, only active) ----
+  const normalize = (s: string) => s.trim();
+
+  const { data: pickupRow, error: pickupErr } = await supabase
+    .from("service_locations")
+    .select("name, fee_fjd")
+    .ilike("name", normalize(pickup_location))
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (pickupErr) {
+    return new NextResponse(`Pickup lookup error: ${pickupErr.message}`, { status: 400 });
+  }
+  if (!pickupRow) {
+    return new NextResponse(
+      `Pickup location not allowed: "${pickup_location}". Please choose one of the active service locations.`,
+      { status: 400 }
+    );
+  }
+
+  const { data: dropRow, error: dropErr } = await supabase
+    .from("service_locations")
+    .select("name, fee_fjd")
+    .ilike("name", normalize(dropoff_location))
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (dropErr) return new NextResponse(`Drop-off lookup error: ${dropErr.message}`, { status: 400 });
+  if (!dropRow) {
+    return new NextResponse(
+      `Drop-off location not allowed: "${dropoff_location}". Please choose one of the active service locations.`,
+      { status: 400 }
+    );
+  }
+
+  const pickupFeeFjd = Number(pickupRow.fee_fjd || 0);
+  const dropoffFeeFjd = Number(dropRow.fee_fjd || 0);
+  const finalTotal = Number(total_price || 0) + pickupFeeFjd + dropoffFeeFjd;
+
+  // generate a mostly-unique booking code (you also have a DB default; this is fine too)
   const code = `BR-${Date.now().toString().slice(-6)}`;
 
-  // Insert booking (without license fields yet)
+  // Insert booking (no fee columns yet — we’ll add them later if you want to snapshot)
   const insertRow = {
     vehicle_id,
     start_date,
     end_date,
-    pickup_location,
-    dropoff_location,
+    pickup_location: pickupRow.name, // normalized DB value
+    dropoff_location: dropRow.name,  // normalized DB value
     customer_name,
     contact_number,
     email,
-    total_price,
+    total_price: finalTotal,         // store final amount including fees
     status: "PENDING",
     code,
   };
@@ -132,7 +175,7 @@ export async function POST(req: Request) {
   const { data: inserted, error: insertError } = await supabase
     .from("bookings")
     .insert(insertRow)
-    .select("id, code, status")
+    .select("id, code, status, total_price")
     .single();
 
   if (insertError || !inserted) {
@@ -143,7 +186,9 @@ export async function POST(req: Request) {
   if (licenseFile) {
     try {
       const bookingId = inserted.id as string;
-      const ext = getFileExtension(licenseFile.name) || (licenseFile.type === "image/png" ? ".png" : ".jpg");
+      const ext =
+        getFileExtension(licenseFile.name) ||
+        (licenseFile.type === "image/png" ? ".png" : ".jpg");
       const objectPath = `licenses/${bookingId}/license-${Date.now()}${ext}`;
 
       const arrayBuf = await licenseFile.arrayBuffer();
@@ -156,24 +201,29 @@ export async function POST(req: Request) {
           upsert: false,
         });
 
-      if (uploadErr) {
-        // We won't fail the whole booking if upload fails; return 207-like info
-        console.error("[create] license upload failed:", uploadErr.message);
-      } else {
-        // Store STORAGE PATH in bookings. (Bucket is private; we'll serve signed URLs later.)
-        const { error: updateErr } = await supabase
+      if (!uploadErr) {
+        await supabase
           .from("bookings")
           .update({ license_url: objectPath, license_uploaded_at: new Date().toISOString() })
           .eq("id", bookingId);
-
-        if (updateErr) {
-          console.error("[create] license URL update failed:", updateErr.message);
-        }
+      } else {
+        console.error("[create] license upload failed:", uploadErr.message);
       }
     } catch (e: any) {
       console.error("[create] license handling exception:", e?.message || e);
     }
   }
 
-  return NextResponse.json(inserted, { status: 201 });
+  // Return fee breakdown so UI can show it immediately
+  return NextResponse.json(
+    {
+      id: inserted.id,
+      code: inserted.code,
+      status: inserted.status,
+      total_price: inserted.total_price,
+      pickup_fee_fjd: pickupFeeFjd,
+      dropoff_fee_fjd: dropoffFeeFjd,
+    },
+    { status: 201 }
+  );
 }
