@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,8 @@ import {
   Phone,
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
+  List as ListIcon,
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -33,6 +35,7 @@ const availabilityFilters = ["All", "Available", "Unavailable"] as const;
 type AvailabilityFilter = (typeof availabilityFilters)[number];
 
 type ImagesByVehicle = Record<string, string[]>;
+type ViewMode = "card" | "list";
 
 /** Convert DB path -> public URL safely */
 const publicUrlForPath = (path: string) => {
@@ -54,6 +57,28 @@ export default function VehiclesPage() {
   const [selectedAvailability, setSelectedAvailability] =
     useState<AvailabilityFilter>("All");
   const [showFilters, setShowFilters] = useState(false);
+
+  /* Loading */
+  const [isLoading, setIsLoading] = useState(true);
+
+  /* View Mode (persisted) */
+  const [viewMode, setViewMode] = useState<ViewMode>("card");
+  useEffect(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? (localStorage.getItem("fleet:viewMode") as ViewMode | null)
+        : null;
+    if (saved === "card" || saved === "list") setViewMode(saved);
+  }, []);
+  useEffect(() => {
+    if (typeof window !== "undefined")
+      localStorage.setItem("fleet:viewMode", viewMode);
+  }, [viewMode]);
+
+  /* Pagination */
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9); // adjusted responsively
+  const gridTopRef = useRef<HTMLDivElement | null>(null);
 
   /* Lightbox */
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -78,15 +103,11 @@ export default function VehiclesPage() {
   }, []);
 
   const nextImage = useCallback(() => {
-    setActiveIndex((i) =>
-      activeImages.length ? (i + 1) % activeImages.length : 0
-    );
+    setActiveIndex((i) => (activeImages.length ? (i + 1) % activeImages.length : 0));
   }, [activeImages.length]);
 
   const prevImage = useCallback(() => {
-    setActiveIndex((i) =>
-      activeImages.length ? (i - 1 + activeImages.length) % activeImages.length : 0
-    );
+    setActiveIndex((i) => (activeImages.length ? (i - 1 + activeImages.length) % activeImages.length : 0));
   }, [activeImages.length]);
 
   useEffect(() => {
@@ -100,12 +121,25 @@ export default function VehiclesPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxOpen, nextImage, prevImage, closeLightbox]);
 
-  /* Load vehicles + override availability for today's bookings */
+  /* Responsive page size (simple heuristic) */
+  useEffect(() => {
+    const setSize = () => {
+      const w = window.innerWidth;
+      if (w < 640) setPageSize(6); // mobile
+      else if (w < 1024) setPageSize(8); // tablets/smaller laptops
+      else setPageSize(9); // desktop+
+    };
+    setSize();
+    window.addEventListener("resize", setSize);
+    return () => window.removeEventListener("resize", setSize);
+  }, []);
+
+  /* Load vehicles + availability (BULK) */
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
-      // 1) Vehicles
+      setIsLoading(true);
       const { data, error } = await supabase
         .from("vehicles")
         .select(
@@ -116,19 +150,21 @@ export default function VehiclesPage() {
 
       if (error) {
         console.error("[VehiclesPage] fetch error:", error);
-        if (!cancelled) setVehicles([]);
+        if (!cancelled) {
+          setVehicles([]);
+          setImagesByVehicle({});
+          setIsLoading(false);
+        }
         return;
       }
       if (cancelled) return;
 
-      // 2) Images + map
       const baseMapped: Vehicle[] =
         (data || []).map((v: any) => {
           let img: string | null = v.public_url ?? null;
           if (!img && v.image_path) {
             img = publicUrlForPath(v.image_path) || null;
           }
-
           return {
             id: v.id,
             name: v.title,
@@ -137,7 +173,7 @@ export default function VehiclesPage() {
             year: Number(v.year ?? 0),
             pricePerDay: Number(v.rental_price ?? 0),
             licensePlate: v.registration_number ?? "",
-            available: Boolean(v.available), // will override below
+            available: Boolean(v.available),
             image: img,
             imagePath: v.image_path ?? null,
             category: v.category ?? "",
@@ -149,42 +185,44 @@ export default function VehiclesPage() {
         }) || [];
 
       if (baseMapped.length === 0) {
-        if (!cancelled) setVehicles([]);
+        if (!cancelled) {
+          setVehicles([]);
+          setImagesByVehicle({});
+          setIsLoading(false);
+        }
         return;
       }
 
-      // 3) Unavailable today?
       const todayStr = format(new Date(), "yyyy-MM-dd");
-      const checks = await Promise.all(
-        baseMapped.map(async (v) => {
-          try {
-            const res = await fetch(
-              `/api/availability/${v.id}?includePending=1`,
-              { cache: "no-store" }
-            );
-            const json = await res.json().catch(() => ({}));
-            const ranges: Array<{ start: string; end: string }> = json?.ranges || [];
-            const bookedToday = ranges.some(
-              (r) => (r.start as string) <= todayStr && todayStr <= (r.end as string)
-            );
-            return { id: v.id, bookedToday };
-          } catch (e) {
-            console.warn("[VehiclesPage] availability check failed for", v.id, e);
-            return { id: v.id, bookedToday: false };
-          }
-        })
-      );
-
-      const unavailableSet = new Set(
-        checks.filter((c) => c.bookedToday).map((c) => String(c.id))
-      );
+      let unavailableSet = new Set<string>();
+      try {
+        const ids = baseMapped.map((v) => v.id);
+        const res = await fetch("/api/availability/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ vehicleIds: ids, includePending: 1 }),
+        });
+        const json: any = await res.json().catch(() => ({}));
+        const results = json?.results || {};
+        unavailableSet = new Set(
+          Object.entries(results)
+            .filter(([_, ranges]) =>
+              (ranges as Array<{ start: string; end: string }>).some(
+                (r) => r.start <= todayStr && todayStr <= r.end
+              )
+            )
+            .map(([vehicleId]) => String(vehicleId))
+        );
+      } catch (e) {
+        console.warn("[VehiclesPage] bulk availability check failed:", e);
+      }
 
       const mapped = baseMapped.map((v) => ({
         ...v,
         available: v.available && !unavailableSet.has(String(v.id)),
       }));
 
-      // 5) Gallery images
       let grouped: ImagesByVehicle = {};
       try {
         const ids = mapped.map((v) => v.id);
@@ -206,7 +244,7 @@ export default function VehiclesPage() {
               if (!acc[vid]) acc[vid] = [];
               if (url) acc[vid].push(url);
               return acc;
-            }, {});
+            }, {} as ImagesByVehicle);
           }
         }
       } catch (e: any) {
@@ -216,6 +254,7 @@ export default function VehiclesPage() {
       if (!cancelled) {
         setVehicles(mapped);
         setImagesByVehicle(grouped);
+        setIsLoading(false);
       }
     };
 
@@ -236,7 +275,6 @@ export default function VehiclesPage() {
         }
       });
     };
-
     window.addEventListener("scroll", handleVisibility);
     handleVisibility();
     return () => window.removeEventListener("scroll", handleVisibility);
@@ -253,6 +291,26 @@ export default function VehiclesPage() {
         : !v.available
     );
 
+  // Reset to page 1 when filters or view change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory, selectedAvailability, viewMode]);
+
+  /* Paging */
+  const totalItems = filteredVehicles.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const startIdx = (currentPage - 1) * pageSize;
+  const endIdx = startIdx + pageSize;
+  const pagedVehicles = filteredVehicles.slice(startIdx, endIdx);
+
+  const goToPage = (p: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, p));
+    setCurrentPage(clamped);
+    if (gridTopRef.current) {
+      gridTopRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   /* =========================
      SEO: JSON-LD (BREADCRUMB + ITEMLIST)
      ========================= */
@@ -261,31 +319,20 @@ export default function VehiclesPage() {
       "@context": "https://schema.org",
       "@type": "BreadcrumbList",
       itemListElement: [
-        {
-          "@type": "ListItem",
-          position: 1,
-          name: "Home",
-          item: `${SITE_URL}/`,
-        },
-        {
-          "@type": "ListItem",
-          position: 2,
-          name: "Vehicles",
-          item: `${SITE_URL}/vehicles`,
-        },
+        { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_URL}/` },
+        { "@type": "ListItem", position: 2, name: "Vehicles", item: `${SITE_URL}/vehicles` },
       ],
     }),
     []
   );
 
   const vehicleListJsonLd = useMemo(() => {
-    const elements = filteredVehicles.map((v, idx) => {
+    const elements = pagedVehicles.map((v, idx) => {
       const images = imagesByVehicle[String(v.id)] ?? [];
       const primaryImage = images[0] || v.image || `${SITE_URL}/og-image.jpg`;
-
       return {
         "@type": "ListItem",
-        position: idx + 1,
+        position: (currentPage - 1) * pageSize + idx + 1,
         url: `${SITE_URL}/booking?vehicle=${encodeURIComponent(String(v.id))}`,
         item: {
           "@type": "Vehicle",
@@ -317,7 +364,67 @@ export default function VehiclesPage() {
       itemListElement: elements,
       numberOfItems: elements.length,
     };
-  }, [filteredVehicles, imagesByVehicle]);
+  }, [pagedVehicles, imagesByVehicle, currentPage, pageSize]);
+
+  /* Skeleton loader for initial fetch */
+  const SkeletonCard = ({ mode = "card" as ViewMode }) => {
+    if (mode === "list") {
+      return (
+        <div className="w-full">
+          <div className="flex gap-3 p-3 rounded-lg border bg-card/50 animate-pulse">
+            <div className="w-32 h-24 bg-muted rounded-md" />
+            <div className="flex-1 space-y-2">
+              <div className="h-5 w-2/3 bg-muted rounded" />
+              <div className="h-4 w-1/3 bg-muted rounded" />
+              <div className="h-8 w-32 bg-muted rounded mt-2" />
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <Card className="overflow-hidden border-0 bg-gradient-to-br from-card to-card/50 animate-pulse">
+        <div className="w-full h-40 sm:h-52 bg-muted" />
+        <div className="p-4 space-y-3">
+          <div className="h-6 w-2/3 bg-muted rounded" />
+          <div className="h-4 w-1/3 bg-muted rounded" />
+          <div className="h-10 w-32 bg-muted rounded" />
+        </div>
+      </Card>
+    );
+  };
+
+  /* View toggle UI */
+  const ViewToggle = () => (
+    <div
+      className="inline-flex rounded-lg overflow-hidden border border-white/40 bg-black/40 backdrop-blur px-1"
+      role="group"
+      aria-label="Change fleet view"
+    >
+      <button
+        onClick={() => setViewMode("card")}
+        className={`px-3 py-2 flex items-center gap-2 text-white text-sm ${
+          viewMode === "card" ? "bg-white/20 font-semibold" : "hover:bg-white/10"
+        }`}
+        aria-label="Card view"
+        title="Card view"
+      >
+        <LayoutGrid className="h-4 w-4" />
+        <span className="hidden sm:inline">Card</span>
+      </button>
+      <button
+        onClick={() => setViewMode("list")}
+        className={`px-3 py-2 flex items-center gap-2 text-white text-sm ${
+          viewMode === "list" ? "bg-white/20 font-semibold" : "hover:bg-white/10"
+        }`}
+        aria-label="List view"
+        title="List view"
+      >
+        <ListIcon className="h-4 w-4" />
+        <span className="hidden sm:inline">List</span>
+      </button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -371,9 +478,11 @@ export default function VehiclesPage() {
             </p>
           </div>
 
+          {/* Controls row */}
           <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 items-start sm:items-center justify-between">
+            {/* Left: filters + COUNT PILL (separate) */}
             <div className="flex flex-col gap-3 w-full">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -383,6 +492,13 @@ export default function VehiclesPage() {
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                 </Button>
+
+                {/* Vehicle count as its own pill */}
+                <div className="px-3 py-1.5 rounded-lg border border-white/30 bg-black/40 backdrop-blur">
+                  <p className="text-white/90 text-sm font-medium">
+                    {totalItems} vehicle{totalItems !== 1 ? "s" : ""} found
+                  </p>
+                </div>
               </div>
 
               {/* Categories */}
@@ -428,176 +544,344 @@ export default function VehiclesPage() {
               </div>
             </div>
 
-            <div className="hidden sm:block glass-effect px-4 py-2 rounded-lg">
-              <p className="text-white/90 font-medium">
-                {filteredVehicles.length} vehicle
-                {filteredVehicles.length !== 1 ? "s" : ""} found
-              </p>
+            {/* Right: ONLY the ViewToggle (separate from count) */}
+            <div className="w-full sm:w-auto flex justify-start sm:justify-end">
+              <ViewToggle />
             </div>
           </div>
         </div>
       </section>
 
-      {/* Cards */}
+      {/* Cards / List */}
       <section className="py-12 sm:py-20 px-4 bg-gradient-to-b from-background to-muted/10">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-            {filteredVehicles.map((vehicle: Vehicle, index: number) => {
-              const gallery = imagesByVehicle[String(vehicle.id)] ?? [];
-              const thumbs = gallery.slice(0, 4);
-              return (
-                <div
-                  key={vehicle.id}
-                  className="fade-in-up"
-                  style={{ animationDelay: `${index * 0.1}s` }}
-                >
-                  <Card className="card-3d tilt-3d overflow-hidden border-0 bg-gradient-to-br from-card to-card/50 group">
-                    <div className="relative overflow-hidden">
-                      <Image
-                        src={vehicle.image || "/placeholder.svg"}
-                        alt={vehicle.name}
-                        width={300}
-                        height={200}
-                        className="w-full h-40 sm:h-52 object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div ref={gridTopRef} />
 
-                      <div className="absolute top-3 sm:top-4 left-3 sm:left-4">
-                        <Badge className="glass-effect-dark text-white border-white/20 font-medium">
-                          {vehicle.category || "—"}
-                        </Badge>
-                      </div>
-
-                      <div className="absolute top-3 sm:top-4 right-3 sm:right-4">
-                        {vehicle.available ? (
-                          <Badge className="bg-green-600 hover:bg-green-600 text-white font-bold pulse-glow">
-                            Available Now
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-red-600 hover:bg-red-600 text-white font-bold ring-2 ring-red-300/40 shadow-md">
-                            Unavailable
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Thumbs */}
-                      {thumbs.length > 1 && (
-                        <div className="absolute bottom-2 left-2 right-2 flex gap-2 justify-end">
-                          {thumbs.map((u, i) => (
-                            <button
-                              key={i}
-                              className="relative w-10 h-10 rounded-md overflow-hidden ring-1 ring-white/30 bg-black/30 hover:ring-white transition"
-                              onClick={() => openLightbox(vehicle.id, i)}
-                              aria-label={`View image ${i + 1} of ${vehicle.name}`}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={u} alt="" className="w-full h-full object-cover" />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <CardHeader className="pb-3 sm:pb-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg sm:text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-300">
-                          {vehicle.name}
-                        </h3>
-                        <div className="text-right">
-                          <p className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-                            ${vehicle.pricePerDay}
-                          </p>
-                          <p className="text-xs sm:text-sm text-muted-foreground font-medium">
-                            per day
-                          </p>
-                        </div>
-                      </div>
-                    </CardHeader>
-
-                    <CardContent className="pt-0 space-y-4 sm:space-y-6">
-                      <div className="grid grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                          <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                            <Users className="h-4 w-4 text-primary" />
-                          </div>
-                          <span className="font-medium">
-                            {vehicle.passengers} passengers
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                          <div className="w-7 h-7 sm:w-8 sm:h-8 bg-secondary/10 rounded-full flex items-center justify-center">
-                            <Fuel className="h-4 w-4 text-secondary" />
-                          </div>
-                          <span className="font-medium">{vehicle.fuel}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                          <div className="w-7 h-7 sm:w-8 sm:h-8 bg-accent/10 rounded-full flex items-center justify-center">
-                            <Car className="h-4 w-4 text-accent" />
-                          </div>
-                          <span className="font-medium">{vehicle.transmission}</span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <p className="text-xs sm:text-sm font-bold text-foreground mb-2 sm:mb-3">
-                          Premium Features:
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {vehicle.features.slice(0, 3).map((feature: string, index: number) => (
-                            <Badge
-                              key={index}
-                              variant="outline"
-                              className="text-[10px] sm:text-xs font-medium border-primary/20 hover:bg-primary/10 transition-colors"
-                            >
-                              {feature}
-                            </Badge>
-                          ))}
-                          {vehicle.features.length > 3 && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] sm:text-xs font-medium border-secondary/20 hover:bg-secondary/10 transition-colors"
-                            >
-                              +{vehicle.features.length - 3} more
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex gap-3 pt-1 sm:pt-2">
-                        <Button
-                          asChild
-                          className="flex-1 btn-3d bg-primary hover:bg-primary/90 font-bold text-base sm:text-lg py-4 sm:py-6"
-                          disabled={!vehicle.available}
-                        >
-                          <Link href={`/booking?vehicle=${vehicle.id}`}>
-                            {vehicle.available ? "Book Now" : "Reserve"}
-                          </Link>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="btn-3d px-4 sm:px-6 py-4 sm:py-6 border-primary/20 hover:bg-primary/10 bg-transparent"
-                          onClick={() => openLightbox(vehicle.id, 0)}
-                          disabled={(imagesByVehicle[String(vehicle.id)]?.length ?? 0) === 0}
-                          title="View photos"
-                        >
-                          <Eye className="h-5 w-5" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+          {/* Loading skeletons */}
+          {isLoading ? (
+            <>
+              {viewMode === "list" ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonCard key={i} mode="list" />
+                  ))}
                 </div>
-              );
-            })}
-          </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <SkeletonCard key={i} mode="card" />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* LIST VIEW */}
+              {viewMode === "list" && (
+                <div className="space-y-3">
+                  {pagedVehicles.map((vehicle: Vehicle, index: number) => {
+                    const gallery = imagesByVehicle[String(vehicle.id)] ?? [];
+                    return (
+                      <div
+                        key={vehicle.id}
+                        className="fade-in-up"
+                        style={{ animationDelay: `${index * 0.05}s` }}
+                      >
+                        <div className="flex gap-3 p-3 rounded-lg border bg-gradient-to-br from-card to-card/50 group">
+                          <div className="relative shrink-0 w-32 h-24 rounded-md overflow-hidden">
+                            <Image
+                              src={vehicle.image || "/placeholder.svg"}
+                              alt={vehicle.name}
+                              fill
+                              sizes="128px"
+                              className="object-cover group-hover:scale-110 transition-transform duration-500"
+                              loading="lazy"
+                            />
+                            <div className="absolute top-2 left-2">
+                              <Badge className="glass-effect-dark text-white border-white/20 font-medium">
+                                {vehicle.category || "—"}
+                              </Badge>
+                            </div>
+                          </div>
 
-          {filteredVehicles.length === 0 && (
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <h3 className="text-base sm:text-lg font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                                  {vehicle.name}
+                                </h3>
+                                <div className="mt-1 flex items-center gap-3 text-xs sm:text-sm text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <Users className="h-3.5 w-3.5" />
+                                    {vehicle.passengers}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Fuel className="h-3.5 w-3.5" />
+                                    {vehicle.fuel}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Car className="h-3.5 w-3.5" />
+                                    {vehicle.transmission}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <p className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                                  ${vehicle.pricePerDay}
+                                </p>
+                                <p className="text-xs text-muted-foreground">per day</p>
+                                <div className="mt-1">
+                                  {vehicle.available ? (
+                                    <Badge className="bg-green-600 hover:bg-green-600 text-white font-bold">
+                                      Available
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="bg-red-600 hover:bg-red-600 text-white font-bold">
+                                      Unavailable
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex items-center gap-2">
+                              <Button
+                                asChild
+                                className="btn-3d bg-primary hover:bg-primary/90 font-semibold text-sm px-4 py-2"
+                                disabled={!vehicle.available}
+                              >
+                                <Link href={`/booking?vehicle=${vehicle.id}`}>
+                                  {vehicle.available ? "Book Now" : "Reserve"}
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="btn-3d border-primary/20 hover:bg-primary/10 bg-transparent px-3 py-2"
+                                onClick={() => openLightbox(vehicle.id, 0)}
+                                disabled={(imagesByVehicle[String(vehicle.id)]?.length ?? 0) === 0}
+                                title="View photos"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* CARD GRID */}
+              {viewMode !== "list" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+                  {pagedVehicles.map((vehicle: Vehicle, index: number) => {
+                    const gallery = imagesByVehicle[String(vehicle.id)] ?? [];
+                    const thumbs = gallery.slice(0, 4);
+                    return (
+                      <div
+                        key={vehicle.id}
+                        className="fade-in-up"
+                        style={{ animationDelay: `${index * 0.05}s` }}
+                      >
+                        <Card className="card-3d tilt-3d overflow-hidden border-0 bg-gradient-to-br from-card to-card/50 group">
+                          <div className="relative overflow-hidden">
+                            <Image
+                              src={vehicle.image || "/placeholder.svg"}
+                              alt={vehicle.name}
+                              width={300}
+                              height={200}
+                              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                              loading="lazy"
+                              className="w-full h-40 sm:h-52 object-cover group-hover:scale-110 transition-transform duration-500"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                            <div className="absolute top-3 sm:top-4 left-3 sm:left-4">
+                              <Badge className="glass-effect-dark text-white border-white/20 font-medium">
+                                {vehicle.category || "—"}
+                              </Badge>
+                            </div>
+
+                            <div className="absolute top-3 sm:top-4 right-3 sm:right-4">
+                              {vehicle.available ? (
+                                <Badge className="bg-green-600 hover:bg-green-600 text-white font-bold pulse-glow">
+                                  Available Now
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-red-600 hover:bg-red-600 text-white font-bold ring-2 ring-red-300/40 shadow-md">
+                                  Unavailable
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* Thumbs */}
+                            {thumbs.length > 1 && (
+                              <div className="absolute bottom-2 left-2 right-2 flex gap-2 justify-end">
+                                {thumbs.map((u, i) => (
+                                  <button
+                                    key={i}
+                                    className="relative w-10 h-10 rounded-md overflow-hidden ring-1 ring-white/30 bg-black/30 hover:ring-white transition"
+                                    onClick={() => openLightbox(vehicle.id, i)}
+                                    aria-label={`View image ${i + 1} of ${vehicle.name}`}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={u} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <CardHeader className="pb-3 sm:pb-4">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-lg sm:text-2xl font-bold text-foreground group-hover:text-primary transition-colors duration-300">
+                                {vehicle.name}
+                              </h3>
+                              <div className="text-right">
+                                <p className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-primary to secondary bg-clip-text text-transparent">
+                                  ${vehicle.pricePerDay}
+                                </p>
+                                <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                                  per day
+                                </p>
+                              </div>
+                            </div>
+                          </CardHeader>
+
+                          <CardContent className="pt-0 space-y-4 sm:space-y-6">
+                            <div className="grid grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
+                              <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
+                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                  <Users className="h-4 w-4 text-primary" />
+                                </div>
+                                <span className="font-medium">{vehicle.passengers} passengers</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
+                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-secondary/10 rounded-full flex items-center justify-center">
+                                  <Fuel className="h-4 w-4 text-secondary" />
+                                </div>
+                                <span className="font-medium">{vehicle.fuel}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
+                                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-accent/10 rounded-full flex items-center justify-center">
+                                  <Car className="h-4 w-4 text-accent" />
+                                </div>
+                                <span className="font-medium">{vehicle.transmission}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-1 sm:pt-2">
+                              <Button
+                                asChild
+                                className="flex-1 btn-3d bg-primary hover:bg-primary/90 font-bold text-base sm:text-lg py-4 sm:py-6"
+                                disabled={!vehicle.available}
+                              >
+                                <Link href={`/booking?vehicle=${vehicle.id}`}>
+                                  {vehicle.available ? "Book Now" : "Reserve"}
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                className="btn-3d px-4 sm:px-6 py-4 sm:py-6 border-primary/20 hover:bg-primary/10 bg-transparent"
+                                onClick={() => openLightbox(vehicle.id, 0)}
+                                disabled={(imagesByVehicle[String(vehicle.id)]?.length ?? 0) === 0}
+                                title="View photos"
+                              >
+                                <Eye className="h-5 w-5" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Pagination controls */}
+          {!isLoading && totalItems > pageSize && (
+            <div className="mt-10 sm:mt-12 flex flex-col items-center gap-4">
+              {/* Mobile: Load more */}
+              <div className="sm:hidden w-full flex flex-col items-center gap-2">
+                {endIdx < totalItems ? (
+                  <Button
+                    onClick={() => goToPage(currentPage + 1)}
+                    className="w-full btn-3d bg-primary hover:bg-primary/90 py-6 text-base font-bold"
+                  >
+                    Load more ({totalItems - endIdx} left)
+                  </Button>
+                ) : (
+                  <p className="text-sm text-muted-foreground">You’ve reached the end.</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Showing {Math.min(endIdx, totalItems)} of {totalItems}
+                </p>
+              </div>
+
+              {/* Tablet/Desktop: Full pager */}
+              <div className="hidden sm:flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="btn-3d"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Prev
+                </Button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => {
+                    if (p === 1 || p === totalPages) return true;
+                    if (Math.abs(p - currentPage) <= 1) return true;
+                    if (totalPages <= 7) return true;
+                    return false;
+                  })
+                  .reduce<number[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push(-1);
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, idx) =>
+                    p === -1 ? (
+                      <span key={`gap-${idx}`} className="px-2 text-muted-foreground">
+                        …
+                      </span>
+                    ) : (
+                      <Button
+                        key={p}
+                        variant={p === currentPage ? "default" : "outline"}
+                        onClick={() => goToPage(p)}
+                        className={p === currentPage ? "btn-3d font-bold" : "btn-3d"}
+                      >
+                        {p}
+                      </Button>
+                    )
+                  )}
+
+                <Button
+                  variant="outline"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="btn-3d"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!isLoading && filteredVehicles.length === 0 && (
             <div className="text-center py-20 fade-in-up">
               <div className="w-24 h-24 gradient-primary rounded-full flex items-center justify-center mx-auto mb-6">
                 <Car className="h-12 w-12 text-white" />
               </div>
-              <h3 className="text-2xl font-bold text-foreground mb-4">
-                No vehicles found
-              </h3>
+              <h3 className="text-2xl font-bold text-foreground mb-4">No vehicles found</h3>
               <p className="text-muted-foreground mb-8 text-lg">
                 Try adjusting your filters to see more options
               </p>
