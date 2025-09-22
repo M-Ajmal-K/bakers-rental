@@ -26,7 +26,8 @@ import {
   Landmark,
   Banknote,
   Smartphone,
-  ShieldCheck
+  ShieldCheck,
+  Clock
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -84,6 +85,20 @@ function rangesOverlap(aStart: Date, aEnd: Date, r: BookedRange) {
   const s2 = atStartOfDay(r.start).getTime();
   const e2 = atStartOfDay(r.end).getTime();
   return s1 <= e2 && s2 <= e1;
+}
+
+/** Combine a local date (Date) and "HH:mm" into a local Date */
+function combineLocalDateAndTime(date: Date, hhmm: string): Date {
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n || "0", 10));
+  const d = new Date(date);
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
+
+function toLocalISO(date: Date) {
+  // returns "YYYY-MM-DDTHH:mm" in LOCAL time (no timezone suffix)
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /* ---------------- Env for WhatsApp CTA (client-safe NEXT_PUBLIC_*) -------- */
@@ -144,6 +159,8 @@ export default function BookingPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [pickupDate, setPickupDate] = useState<Date>();
   const [returnDate, setReturnDate] = useState<Date>();
+  const [pickupTime, setPickupTime] = useState<string>("10:00");   // NEW
+  const [dropoffTime, setDropoffTime] = useState<string>("10:00"); // NEW
   const [selectedVehicle, setSelectedVehicle] = useState(preselectedVehicle || "");
 
   // Locations managed in DB
@@ -426,6 +443,7 @@ export default function BookingPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
     if (
       pickupDate &&
       returnDate &&
@@ -434,8 +452,20 @@ export default function BookingPage() {
       dropoffLocation &&
       customerInfo.name &&
       customerInfo.phone &&
-      customerInfo.email
+      customerInfo.email &&
+      pickupTime &&
+      dropoffTime
     ) {
+      // Ensure logical time order when same day
+      if (atStartOfDay(pickupDate).getTime() === atStartOfDay(returnDate).getTime()) {
+        const p = combineLocalDateAndTime(pickupDate, pickupTime).getTime();
+        const d = combineLocalDateAndTime(returnDate, dropoffTime).getTime();
+        if (d <= p) {
+          alert("Return time must be after pickup time for the same day.");
+          return;
+        }
+      }
+
       const overlaps = bookedRanges.some((r) => rangesOverlap(pickupDate, returnDate, r));
       if (overlaps) {
         alert("The dates you selected overlap an existing booking for this vehicle. Please choose a different period.");
@@ -461,13 +491,24 @@ export default function BookingPage() {
     const vehicleSubtotal =
       selectedVehicleData ? calculateTieredTotal(selectedVehicleData, calculateDays()) : 0;
 
+    // Combine date + time for convenience (LOCAL)
+    const startLocal = toLocalISO(combineLocalDateAndTime(pickupDate, pickupTime));
+    const endLocal = toLocalISO(combineLocalDateAndTime(returnDate, dropoffTime));
+
     setConfirming(true);
     setErrorMsg(null);
     try {
-      const payload = {
+      const payload: any = {
         vehicle_id: selectedVehicle,
+        // DB columns you already have (dates only)
         start_date: format(atStartOfDay(pickupDate), "yyyy-MM-dd"),
         end_date: format(atStartOfDay(returnDate), "yyyy-MM-dd"),
+        // Times captured from the customer (add these columns later if desired)
+        pickup_time: pickupTime,     // "HH:mm"
+        dropoff_time: dropoffTime,   // "HH:mm"
+        // Helpful combined fields your API can use (even if DB doesn't store them yet)
+        start_datetime_local: startLocal,   // "YYYY-MM-DDTHH:mm"
+        end_datetime_local: endLocal,       // "YYYY-MM-DDTHH:mm"
         pickup_location: pickupLocation,
         dropoff_location: dropoffLocation,
         customer_name: customerInfo.name,
@@ -497,7 +538,7 @@ export default function BookingPage() {
         return;
       }
 
-      const data = await res.json(); // { id, code, status, total_price, pickup_fee_fjd, dropoff_fee_fjd }
+      const data = await res.json(); // { id, code, status, ... }
       setBookingCode(data?.code ?? null);
       setShowSuccess(true);
       setShowPayment(true);
@@ -517,6 +558,7 @@ export default function BookingPage() {
 
     // bond math for dialog
     const totalNow = calculateTotal(); // includes location fees
+    const sameDay = pickupDate && returnDate && atStartOfDay(pickupDate).getTime() === atStartOfDay(returnDate).getTime();
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -524,7 +566,6 @@ export default function BookingPage() {
         <Dialog open={showPayment} onOpenChange={setShowPayment}>
           <DialogContent
             className={cn(
-              // ✅ fixed typos & improved mobile fit
               "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl mx-auto",
               "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
               "p-0 overflow-hidden sm:rounded-2xl rounded-xl border-0 flex flex-col",
@@ -581,6 +622,24 @@ export default function BookingPage() {
                 <div className="sm:hidden flex justify-center">
                   <div className="font-mono text-xs font-semibold text-foreground bg-muted px-3 py-1.5 rounded-md">
                     Code: {bookingCode}
+                  </div>
+                </div>
+              )}
+
+              {/* Trip timing quick view */}
+              {(pickupDate && returnDate) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4">
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Pickup</p>
+                    <p className="text-sm font-semibold">
+                      {format(pickupDate, "PPP")} • {pickupTime}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4">
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Drop-off</p>
+                    <p className="text-sm font-semibold">
+                      {format(returnDate, "PPP")} • {dropoffTime}{sameDay ? " (same day)" : ""}
+                    </p>
                   </div>
                 </div>
               )}
@@ -710,6 +769,11 @@ export default function BookingPage() {
             </div>
           </div>
           <h1 className="text-2xl md:text-4xl font-bold text-foreground mb-3 md:mb-4">Booking Created!</h1>
+          {pickupDate && returnDate && (
+            <p className="text-sm md:text-base text-muted-foreground mb-2">
+              {format(pickupDate, "PPP")} • {pickupTime} → {format(returnDate, "PPP")} • {dropoffTime}
+            </p>
+          )}
           <p className="text-base md:text-xl text-muted-foreground mb-3 md:mb-4 max-w-md mx-auto">
             Your booking has been created and is <strong>pending confirmation</strong>.
           </p>
@@ -737,7 +801,6 @@ export default function BookingPage() {
     const days = calculateDays();
     const breakdown = selectedVehicleData ? breakdownText(selectedVehicleData, days) : "";
     const total = calculateTotal(); // includes location fees
-    const balanceDue = Math.max(total - BOND_FJD, 0);
     const vehicleSubtotal = selectedVehicleData ? calculateTieredTotal(selectedVehicleData, days) : 0;
 
     return (
@@ -800,14 +863,18 @@ export default function BookingPage() {
                         <div className="space-y-2 md:space-y-3 text-sm md:text-base">
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Pickup:</span>
-                            <span className="font-medium">{pickupDate ? format(pickupDate, "PPP") : ""}</span>
+                            <span className="font-medium">
+                              {pickupDate ? `${format(pickupDate, "PPP")} • ${pickupTime}` : ""}
+                            </span>
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Return:</span>
-                            <span className="font-medium">{returnDate ? format(returnDate, "PPP") : ""}</span>
+                            <span className="font-medium">
+                              {returnDate ? `${format(returnDate, "PPP")} • ${dropoffTime}` : ""}
+                            </span>
                           </p>
                           <p className="flex justify-between">
-                            <span className="text-muted-foreground">Duration:</span>
+                            <span className="text-muted-foreground">Duration (billable days):</span>
                             <span className="text-secondary font-bold">
                               {days} day{days !== 1 ? "s" : ""}
                             </span>
@@ -862,15 +929,6 @@ export default function BookingPage() {
                     </Card>
                   </div>
 
-                  {customerInfo.notes && (
-                    <Card className="border-0 bg-gradient-to-r from-muted/20 to-muted/10">
-                      <CardContent className="p-4 md:p-6">
-                        <h3 className="text-base md:text-lg font-bold text-foreground mb-2 md:mb-3">Special Notes</h3>
-                        <p className="text-muted-foreground italic text-sm md:text-base">{customerInfo.notes}</p>
-                      </CardContent>
-                    </Card>
-                  )}
-
                   {/* Totals with fees */}
                   <Card className="border-0 bg-gradient-to-r from-primary to-secondary">
                     <CardContent className="p-4 md:pb-6 text-center space-y-2">
@@ -892,16 +950,6 @@ export default function BookingPage() {
                       <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white mt-2">
                         <span>Total Amount:</span>
                         <span>${total}</span>
-                      </div>
-
-                      {/* Bond & balance note */}
-                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div className="rounded-md bg-white/10 text-white px-3 py-2 text-sm">
-                          <span className="font-semibold">Due now (Bond):</span> ${BOND_FJD} FJD
-                        </div>
-                        <div className="rounded-md bg-white/10 text-white px-3 py-2 text-sm">
-                          <span className="font-semibold">Balance on arrival:</span> ${Math.max(total - BOND_FJD, 0)}
-                        </div>
                       </div>
 
                       {currentTier && (
@@ -1000,7 +1048,7 @@ export default function BookingPage() {
           <form id="booking-form" onSubmit={handleSubmit} className="space-y-6 md:space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
               <div className="lg:col-span-2 space-y-6 md:space-y-8">
-                {/* Dates */}
+                {/* Dates & Times */}
                 <div className="fade-in-up" style={{ animationDelay: "0.1s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1008,7 +1056,7 @@ export default function BookingPage() {
                         <div className="w-9 h-9 md:w-10 md:h-10 gradient-primary rounded-full flex items-center justify-center">
                           <CalendarIcon className="h-4 w-4 md:h-5 md:w-5 text-white" />
                         </div>
-                        Rental Dates
+                        Rental Dates & Times
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-5 md:space-y-6">
@@ -1041,6 +1089,20 @@ export default function BookingPage() {
                               />
                             </PopoverContent>
                           </Popover>
+
+                          {/* Pickup time */}
+                          <div className="pt-2">
+                            <Label htmlFor="pickup-time" className="text-xs md:text-sm font-medium">Pickup Time</Label>
+                            <Input
+                              id="pickup-time"
+                              type="time"
+                              value={pickupTime}
+                              onChange={(e) => setPickupTime(e.target.value)}
+                              className="mt-1 h-11 md:h-12 btn-3d text-sm md:text-base"
+                              required
+                            />
+                          </div>
+
                           {selectedVehicle && (
                             <p className="text-xs md:text-sm text-muted-foreground pt-2">
                               {loadingAvail
@@ -1080,6 +1142,19 @@ export default function BookingPage() {
                               />
                             </PopoverContent>
                           </Popover>
+
+                          {/* Drop-off time */}
+                          <div className="pt-2">
+                            <Label htmlFor="dropoff-time" className="text-xs md:text-sm font-medium">Drop-off Time</Label>
+                            <Input
+                              id="dropoff-time"
+                              type="time"
+                              value={dropoffTime}
+                              onChange={(e) => setDropoffTime(e.target.value)}
+                              className="mt-1 h-11 md:h-12 btn-3d text-sm md:text-base"
+                              required
+                            />
+                          </div>
                         </div>
                       </div>
 
@@ -1146,7 +1221,7 @@ export default function BookingPage() {
                   </Card>
                 </div>
 
-                {/* Pickup & Drop-off */}
+                {/* Pickup & Drop-off Locations */}
                 <div className="fade-in-up" style={{ animationDelay: "0.3s" }}>
                   <Card className="card-3d border-0 bg-gradient-to-br from-card to-card/50">
                     <CardHeader className="pb-4 md:pb-6">
@@ -1262,12 +1337,27 @@ export default function BookingPage() {
                           </div>
 
                           <div className="space-y-3 md:space-y-4">
+                            <div className="p-3 bg-card/50 rounded-lg text-xs md:text-sm text-foreground space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Pickup:</span>
+                                <span className="font-mono">
+                                  {pickupDate ? `${format(pickupDate, "PP")} ${pickupTime}` : "--"}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Drop-off:</span>
+                                <span className="font-mono">
+                                  {returnDate ? `${format(returnDate, "PP")} ${dropoffTime}` : "--"}
+                                </span>
+                              </div>
+                            </div>
+
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Current Daily Rate:</span>
                               <span className="font-bold text-primary">{currentTier ? `$${currentTier.rate}` : `$${selectedVehicleData.pricePerDay}`}</span>
                             </div>
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
-                              <span className="text-muted-foreground">Duration:</span>
+                              <span className="text-muted-foreground">Duration (days):</span>
                               <span className="font-bold">
                                 {currentTier ? currentTier.days : calculateDays()} day{(currentTier ? currentTier.days : calculateDays()) !== 1 ? "s" : ""}
                               </span>
