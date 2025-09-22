@@ -39,6 +39,13 @@ type Payload = {
   customer_name: string;
   contact_number: string;
   email: string;
+
+  // NEW — optional helpers coming from UI:
+  pickup_time?: string | null;              // "HH:mm"
+  dropoff_time?: string | null;             // "HH:mm"
+  start_datetime_local?: string | null;     // "YYYY-MM-DDTHH:mm" (LOCAL, no TZ suffix)
+  end_datetime_local?: string | null;       // "YYYY-MM-DDTHH:mm" (LOCAL, no TZ suffix)
+
   /**
    * Vehicle-only subtotal coming from the client UI (without location fees).
    * If client sends grand total by mistake, we still overwrite with our final calc.
@@ -57,6 +64,33 @@ function getFileExtension(name?: string | null) {
   const idx = name.lastIndexOf(".");
   if (idx === -1) return "";
   return name.slice(idx); // includes dot
+}
+
+function isValidYYYYMMDD(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function isValidHHMM(s?: string | null) {
+  if (!s) return false;
+  const m = /^(\d{2}):(\d{2})$/.exec(s);
+  if (!m) return false;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  return hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59;
+}
+
+function compareLocalDateAndTimes(
+  ymdA: string,
+  hhmmA: string,
+  ymdB: string,
+  hhmmB: string
+): number {
+  // Returns -1, 0, 1 (A < B, A == B, A > B)
+  const a = new Date(`${ymdA}T${hhmmA}:00`);
+  const b = new Date(`${ymdB}T${hhmmB}:00`);
+  const ta = a.getTime();
+  const tb = b.getTime();
+  return ta < tb ? -1 : ta > tb ? 1 : 0;
 }
 
 export async function POST(req: Request) {
@@ -99,6 +133,8 @@ export async function POST(req: Request) {
     contact_number,
     email,
     total_price = 0, // treat as vehicle-only subtotal
+    pickup_time,
+    dropoff_time,
   } = body || ({} as Payload);
 
   // minimal validation
@@ -113,6 +149,22 @@ export async function POST(req: Request) {
     !email
   ) {
     return new NextResponse("Missing required fields", { status: 400 });
+  }
+
+  if (!isValidYYYYMMDD(start_date) || !isValidYYYYMMDD(end_date)) {
+    return new NextResponse("Dates must be in YYYY-MM-DD format", { status: 400 });
+  }
+
+  // Times are required by the UI; validate if provided (accepting explicit "00:00" too)
+  if (!isValidHHMM(pickup_time) || !isValidHHMM(dropoff_time)) {
+    return new NextResponse("Pickup and drop-off times must be in HH:mm format", { status: 400 });
+  }
+
+  // If same day, enforce drop-off after pickup
+  if (start_date === end_date && pickup_time && dropoff_time) {
+    if (compareLocalDateAndTimes(start_date, pickup_time, end_date, dropoff_time) >= 0) {
+      return new NextResponse("For the same day, drop-off time must be after pickup time", { status: 400 });
+    }
   }
 
   // ---- Look up fees from service_locations (case-insensitive, only active) ----
@@ -154,28 +206,30 @@ export async function POST(req: Request) {
   const dropoffFeeFjd = Number(dropRow.fee_fjd || 0);
   const finalTotal = Number(total_price || 0) + pickupFeeFjd + dropoffFeeFjd;
 
-  // generate a mostly-unique booking code (you also have a DB default; this is fine too)
-  const code = `BR-${Date.now().toString().slice(-6)}`;
-
-  // Insert booking (no fee columns yet — we’ll add them later if you want to snapshot)
-  const insertRow = {
+  // Insert booking
+  // - Let DB generate the code via default (booking_code_seq)
+  // - Use 'pending' so exclusion constraint only applies when later marked 'confirmed'
+  const insertRow: any = {
     vehicle_id,
     start_date,
     end_date,
+    pickup_time: pickup_time ?? null,
+    dropoff_time: dropoff_time ?? null,
     pickup_location: pickupRow.name, // normalized DB value
     dropoff_location: dropRow.name,  // normalized DB value
     customer_name,
     contact_number,
     email,
-    total_price: finalTotal,         // store final amount including fees
-    status: "PENDING",
-    code,
+    total_price: finalTotal,         // final amount including fees
+    pickup_fee_fjd: pickupFeeFjd,
+    dropoff_fee_fjd: dropoffFeeFjd,
+    status: "pending",
   };
 
   const { data: inserted, error: insertError } = await supabase
     .from("bookings")
     .insert(insertRow)
-    .select("id, code, status, total_price")
+    .select("id, code, status, total_price, pickup_fee_fjd, dropoff_fee_fjd")
     .single();
 
   if (insertError || !inserted) {
@@ -218,11 +272,11 @@ export async function POST(req: Request) {
   return NextResponse.json(
     {
       id: inserted.id,
-      code: inserted.code,
+      code: inserted.code,                 // from DB default
       status: inserted.status,
-      total_price: inserted.total_price,
-      pickup_fee_fjd: pickupFeeFjd,
-      dropoff_fee_fjd: dropoffFeeFjd,
+      total_price: inserted.total_price,   // includes fees
+      pickup_fee_fjd: inserted.pickup_fee_fjd,
+      dropoff_fee_fjd: inserted.dropoff_fee_fjd,
     },
     { status: 201 }
   );
