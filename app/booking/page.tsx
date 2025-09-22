@@ -517,7 +517,6 @@ export default function BookingPage() {
 
     // bond math for dialog
     const totalNow = calculateTotal(); // includes location fees
-    const balanceDue = Math.max(totalNow - BOND_FJD, 0);
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -525,9 +524,10 @@ export default function BookingPage() {
         <Dialog open={showPayment} onOpenChange={setShowPayment}>
           <DialogContent
             className={cn(
-              "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl",
-              "max-h[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
-              "p-0 overflow-hidden rounded-2xl border-0 flex flex-col",
+              // ✅ fixed typos & improved mobile fit
+              "w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl lg:max-w-3xl mx-auto",
+              "max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)]",
+              "p-0 overflow-hidden sm:rounded-2xl rounded-xl border-0 flex flex-col",
               "shadow-[0_20px_60px_-10px_rgba(0,0,0,0.5)]"
             )}
           >
@@ -543,7 +543,7 @@ export default function BookingPage() {
                   <div>
                     <DialogTitle className="text-white text-base sm:text-lg">Payment Instructions</DialogTitle>
                     <DialogDescription className="text-white/80 text-xs sm:text-sm">
-                      Choose your preferred method below. Send your receipt & booking code via WhatsApp.
+                      Choose your preferred method below. Send your receipt &amp; booking code via WhatsApp.
                     </DialogDescription>
                   </div>
                 </div>
@@ -575,7 +575,7 @@ export default function BookingPage() {
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 overscroll-contain">
               {/* Mobile booking code pill */}
               {bookingCode && (
                 <div className="sm:hidden flex justify-center">
@@ -682,7 +682,7 @@ export default function BookingPage() {
               </div>
             </div>
 
-            <DialogFooter className="px-4 sm:px-6 py-4 sm:py-5 bg-background/70 border-t border-border/40 gap-2 sm:gap-3 flex-shrink-0">
+            <DialogFooter className="px-4 sm:px-6 py-4 sm:py-5 bg-background/70 border-t border-border/40 gap-2 sm:gap-3 flex-shrink-0 pb-[env(safe-area-inset-bottom)]">
               <Button asChild className="w-full sm:w-auto btn-3d bg-green-600 hover:bg-green-600/90">
                 <a href={waHref} target="_blank" rel="noopener">
                   <MessageCircle className="h-4 w-4 mr-2" />
@@ -900,7 +900,7 @@ export default function BookingPage() {
                           <span className="font-semibold">Due now (Bond):</span> ${BOND_FJD} FJD
                         </div>
                         <div className="rounded-md bg-white/10 text-white px-3 py-2 text-sm">
-                          <span className="font-semibold">Balance on arrival:</span> ${balanceDue}
+                          <span className="font-semibold">Balance on arrival:</span> ${Math.max(total - BOND_FJD, 0)}
                         </div>
                       </div>
 
