@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -14,7 +14,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Car, Plus, LogOut, AlertTriangle, Filter } from "lucide-react";
+import {
+  Car,
+  Plus,
+  LogOut,
+  AlertTriangle,
+  Filter,
+  Search,
+  LayoutGrid,
+  List as ListIcon,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 
 import VehicleForm from "./VehicleForm";
 import VehicleList from "./VehicleList";
@@ -25,6 +36,8 @@ import { format } from "date-fns";
 const categories = ["All", "SUV", "Van", "Compact", "Pickup", "Luxury"];
 const availabilityOptions = ["All", "Available", "Unavailable"] as const;
 type AvailabilityFilter = (typeof availabilityOptions)[number];
+
+type ViewMode = "cards" | "list";
 
 /* ---------------- Helpers for images ---------------- */
 type FormImage = NonNullable<FormState["images"]>[number];
@@ -100,6 +113,10 @@ export default function VehicleManagement() {
     useState<AvailabilityFilter>("All");
   const [showFilters, setShowFilters] = useState(false); // mobile toggle
 
+  // NEW: search + view toggle
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+
   const [formData, setFormData] = useState<FormState>({
     name: "",
     brand: "",
@@ -166,32 +183,35 @@ export default function VehicleManagement() {
       }
       const vehiclesRaw = vData || [];
 
-      // 2) Fetch bookings that make a vehicle unavailable today
+      // 2) Use the same bulk availability endpoint as client fleet
       const ids = vehiclesRaw.map((v: any) => v.id).filter(Boolean);
       let unavailSet = new Set<string>();
-
       if (ids.length > 0) {
-        const todayLocal = format(new Date(), "yyyy-MM-dd");
-        const { data: bData, error: bErr } = await supabase
-          .from("bookings")
-          .select("vehicle_id, start_date, end_date, status")
-          .in("vehicle_id", ids)
-          .in("status", ["confirmed", "CONFIRMED"]) // ← match both casings
-          .lte("start_date", todayLocal)
-          .gte("end_date", todayLocal);
-
-        if (!cancelled) {
-          if (bErr) {
-            console.error("[Vehicles] bookings fetch error:", bErr);
-          } else {
-            for (const b of bData || []) {
-              if (b?.vehicle_id) unavailSet.add(String(b.vehicle_id));
-            }
-          }
+        const todayStr = format(new Date(), "yyyy-MM-dd");
+        try {
+          const res = await fetch("/api/availability/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({ vehicleIds: ids, includePending: 1 }),
+          });
+          const json: any = await res.json().catch(() => ({}));
+          const results = json?.results || {};
+          unavailSet = new Set(
+            Object.entries(results)
+              .filter(([_, ranges]) =>
+                (ranges as Array<{ start: string; end: string }>).some(
+                  (r) => r.start <= todayStr && todayStr <= r.end
+                )
+              )
+              .map(([vehicleId]) => String(vehicleId))
+          );
+        } catch (e) {
+          console.warn("[Admin Vehicles] bulk availability check failed:", e);
         }
       }
 
-      // 3) Map to UI type and override availability if booked today
+      // 3) Map to UI type and override availability if booked *today*
       if (cancelled) return;
       const mapped: Vehicle[] =
         vehiclesRaw.map((v: any) => ({
@@ -240,18 +260,35 @@ export default function VehicleManagement() {
     };
   }, []);
 
-  /* ---------------- Derived: filtered list for admin view ---------------- */
-  const filteredVehicles = vehicles.filter((v) => {
-    const categoryOK =
-      selectedCategory === "All" || v.category === selectedCategory;
-    const availOK =
-      availabilityFilter === "All"
+  /* ---------------- Derived: filtered + searched list for admin view ---------------- */
+  const filteredVehicles = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+
+    return vehicles.filter((v) => {
+      const categoryOK =
+        selectedCategory === "All" || v.category === selectedCategory;
+      const availOK =
+        availabilityFilter === "All"
+          ? true
+          : availabilityFilter === "Available"
+          ? v.available
+          : !v.available; // "Unavailable"
+
+      const matchesSearch = !q
         ? true
-        : availabilityFilter === "Available"
-        ? v.available
-        : !v.available; // "Unavailable"
-    return categoryOK && availOK;
-  });
+        : [
+            v.name,
+            v.brand,
+            v.model,
+            v.category,
+            v.licensePlate,
+          ]
+            .filter(Boolean)
+            .some((field) => String(field).toLowerCase().includes(q));
+
+      return categoryOK && availOK && matchesSearch;
+    });
+  }, [vehicles, selectedCategory, availabilityFilter, searchQuery]);
 
   /* ---------------- Fetch images for a vehicle when editing ---------------- */
   const fetchVehicleImages = useCallback(async (vehicleId: string | number) => {
@@ -493,9 +530,7 @@ export default function VehicleManagement() {
     setIsEditDialogOpen(true);
   };
 
-  /* ---------------- Edit (submit)
-     NOTE: This still uses your existing /api/admin/vehicles/update route.
-     If you want to move edit to JSON too, we can switch after create is verified. */
+  /* ---------------- Edit (submit) ---------------- */
   const handleEditVehicle = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -785,9 +820,9 @@ export default function VehicleManagement() {
             </Dialog>
           </div>
 
-          {/* Filters (category + availability) */}
+          {/* Filters + Search + View Toggle */}
           <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -798,13 +833,64 @@ export default function VehicleManagement() {
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                 </Button>
-                <span className="hidden sm:inline text-cyan-100/80 text-sm">
-                  Filter your fleet
-                </span>
+
+                {/* Search */}
+                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white w-full sm:w-80">
+                  <Search className="h-4 w-4 opacity-80" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search vehicles (name, brand, model, plate)..."
+                    className="bg-transparent outline-none w-full placeholder:text-white/60 text-sm"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="text-white/70 hover:text-white text-xs"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="hidden sm:block bg-white/5 text-white/90 px-3 py-1 rounded-lg text-sm">
-                {filteredVehicles.length} vehicle
-                {filteredVehicles.length !== 1 ? "s" : ""} shown
+
+              {/* Count + View toggle */}
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:block bg-white/5 text-white/90 px-3 py-1 rounded-lg text-sm">
+                  {filteredVehicles.length} vehicle
+                  {filteredVehicles.length !== 1 ? "s" : ""} shown
+                </div>
+                <div className="flex items-center gap-1 rounded-lg bg-white/5 border border-white/10 p-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={viewMode === "cards" ? "default" : "outline"}
+                    onClick={() => setViewMode("cards")}
+                    className={
+                      viewMode === "cards"
+                        ? "bg-white text-slate-900"
+                        : "bg-transparent border-0 text-white hover:bg-white/10"
+                    }
+                    title="Card view"
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={viewMode === "list" ? "default" : "outline"}
+                    onClick={() => setViewMode("list")}
+                    className={
+                      viewMode === "list"
+                        ? "bg-white text-slate-900"
+                        : "bg-transparent border-0 text-white hover:bg-white/10"
+                    }
+                    title="List view"
+                  >
+                    <ListIcon className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -849,13 +935,21 @@ export default function VehicleManagement() {
             </div>
           </div>
 
-          {/* Vehicle list */}
+          {/* Vehicle content */}
           <div className="rounded-2xl ring-1 ring-white/10 bg-white/[0.03] backdrop-blur-md">
-            <VehicleList
-              vehicles={filteredVehicles}
-              onEdit={openEditDialog}
-              onDelete={handleDeleteVehicle}
-            />
+            {viewMode === "cards" ? (
+              <VehicleList
+                vehicles={filteredVehicles}
+                onEdit={openEditDialog}
+                onDelete={handleDeleteVehicle}
+              />
+            ) : (
+              <AdminVehicleTable
+                vehicles={filteredVehicles}
+                onEdit={openEditDialog}
+                onDelete={handleDeleteVehicle}
+              />
+            )}
           </div>
 
           {/* Edit dialog */}
@@ -895,5 +989,149 @@ export default function VehicleManagement() {
         </div>
       </section>
     </div>
+  );
+}
+
+/* ---------------- LIST VIEW (inline) ---------------- */
+function AdminVehicleTable({
+  vehicles,
+  onEdit,
+  onDelete,
+}: {
+  vehicles: Vehicle[];
+  onEdit: (v: Vehicle) => void;
+  onDelete: (id: string | number) => void;
+}) {
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full text-left text-sm text-white/90">
+        <thead className="bg-white/5 border-b border-white/10">
+          <tr>
+            <Th>Vehicle</Th>
+            <Th className="min-w=[120px]">Category</Th>
+            <Th className="min-w-[110px]">Daily Rate</Th>
+            <Th className="min-w-[120px]">Plate</Th>
+            <Th className="min-w-[110px]">Seats</Th>
+            <Th className="min-w-[120px]">Status</Th>
+            <Th className="min-w-[140px]" align="right">
+              Actions
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {vehicles.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="p-6 text-center text-white/70">
+                No vehicles match your filters.
+              </td>
+            </tr>
+          ) : (
+            vehicles.map((v) => (
+              <tr
+                key={v.id}
+                className="border-b border-white/5 hover:bg-white/[0.04] transition-colors"
+              >
+                <Td>
+                  <div className="flex items-center gap-3">
+                    <div className="h-12 w-16 rounded-md overflow-hidden bg-white/5 flex items-center justify-center">
+                      {v.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={v.image}
+                          alt={v.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Car className="h-5 w-5 text-white/60" />
+                      )}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-semibold">{v.name}</span>
+                      <span className="text-xs text-white/60">
+                        {v.brand} {v.model} {v.year ? `• ${v.year}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                </Td>
+                <Td>{v.category || "-"}</Td>
+                <Td>${Number(v.pricePerDay || 0).toFixed(0)}</Td>
+                <Td>{v.licensePlate || "-"}</Td>
+                <Td>{v.passengers || 0}</Td>
+                <Td>
+                  <span
+                    className={
+                      "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium " +
+                      (v.available
+                        ? "bg-green-500/15 text-green-300 ring-1 ring-green-500/30"
+                        : "bg-red-500/15 text-red-300 ring-1 ring-red-500/30")
+                    }
+                  >
+                    {v.available ? "Available" : "Unavailable"}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onEdit(v)}
+                      className="bg-white/5 hover:bg-white/10 border-white/10 text-white"
+                    >
+                      <Pencil className="h-4 w-4 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => onDelete(v.id)}
+                      className="bg-red-600 hover:bg-red-600/90 text-white"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" /> Delete
+                    </Button>
+                  </div>
+                </Td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Th({
+  children,
+  className = "",
+  align,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  align?: "left" | "right" | "center";
+}) {
+  return (
+    <th
+      className={`px-4 py-3 text-xs uppercase tracking-wider text-white/70 ${className}`}
+      style={{ textAlign: align || "left" }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  className = "",
+  align,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  align?: "left" | "right" | "center";
+}) {
+  return (
+    <td
+      className={`px-4 py-3 align-middle ${className}`}
+      style={{ textAlign: align || "left" }}
+    >
+      {children}
+    </td>
   );
 }
