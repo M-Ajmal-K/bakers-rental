@@ -1,3 +1,4 @@
+// app/admin/dashboard/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -34,8 +35,12 @@ function DashboardContent() {
 
   const handleLogout = async () => {
     try {
+      // 1) end Supabase auth session
+      await supabase.auth.signOut().catch(() => {});
+      // 2) clear opaque cookie used by middleware
       await fetch("/api/admin/session", { method: "DELETE", credentials: "include" });
     } finally {
+      // 3) go straight to login (no extra hop)
       router.replace("/admin/login");
     }
   };
