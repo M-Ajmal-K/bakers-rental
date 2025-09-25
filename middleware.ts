@@ -3,7 +3,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  // ✅ protect BOTH /admin and /admin/:path*
+  matcher: ["/admin", "/admin/:path*"],
 };
 
 const COOKIE_NAME = "admin_session";
@@ -11,7 +12,7 @@ const COOKIE_NAME = "admin_session";
 export function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
-  // Allow the login page itself
+  // Always allow the login page itself
   if (pathname === "/admin/login" || pathname.startsWith("/admin/login/")) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "no-store");
@@ -19,22 +20,36 @@ export function middleware(req: NextRequest) {
     return res;
   }
 
-  // Presence-only check (token compare handled in /api/admin/session + client guard)
-  const hasSession = !!req.cookies.get(COOKIE_NAME)?.value;
-
-  if (!hasSession) {
+  // If someone requests the bare /admin, send them to /admin/login (no loops)
+  if (pathname === "/admin") {
     const url = req.nextUrl.clone();
     url.pathname = "/admin/login";
-    // Preserve existing query (minus next) and add return-to param
-    url.searchParams.delete("next");
-    url.searchParams.set("next", pathname + (searchParams.size ? `?${searchParams.toString()}` : ""));
+    // if a next param already exists, keep it; otherwise default to /admin/dashboard
+    if (!url.searchParams.get("next")) {
+      url.searchParams.set("next", "/admin/dashboard");
+    }
     const res = NextResponse.redirect(url);
     res.headers.set("Cache-Control", "no-store");
     res.headers.set("X-Robots-Tag", "noindex, nofollow");
     return res;
   }
 
-  // Auth cookie present → proceed with anti-cache / noindex headers
+  // Legacy cookie presence check (your Supabase guard handles real auth)
+  const hasSession = !!req.cookies.get(COOKIE_NAME)?.value;
+
+  if (!hasSession) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/admin/login";
+    // Preserve the real target (avoid pointing back to /admin)
+    const wanted = pathname + (searchParams.size ? `?${searchParams.toString()}` : "");
+    url.searchParams.delete("next");
+    url.searchParams.set("next", wanted || "/admin/dashboard");
+    const res = NextResponse.redirect(url);
+    res.headers.set("Cache-Control", "no-store");
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return res;
+  }
+
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "no-store");
   res.headers.set("Pragma", "no-cache");

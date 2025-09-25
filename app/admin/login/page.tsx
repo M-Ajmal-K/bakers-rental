@@ -1,7 +1,7 @@
+// app/admin/login/page.tsx
 "use client";
 
 import type React from "react";
-
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Car, Lock, User, Shield } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function AdminLoginPage() {
   const [credentials, setCredentials] = useState({ username: "", password: "" });
@@ -21,46 +22,55 @@ export default function AdminLoginPage() {
   const searchParams = useSearchParams();
 
   const nextParam = searchParams.get("next");
-  const safeNext =
-    nextParam && nextParam.startsWith("/admin")
-      ? nextParam
-      : "/admin/dashboard";
+  const safeNext = nextParam && nextParam.startsWith("/admin") ? nextParam : "/admin/dashboard";
 
-  // Mount flag (for animation + SSR hydration safety)
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // If already authenticated, bounce straight to dashboard (or ?next=)
+  // If already authenticated as admin via Supabase, set the opaque cookie then redirect.
   useEffect(() => {
     if (!isMounted) return;
     let cancelled = false;
+
     (async () => {
       try {
-        const res = await fetch("/api/admin/session", {
-          method: "GET",
-          credentials: "include",
-          headers: { "Cache-Control": "no-store" },
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!cancelled && res.ok && j?.authed) {
-          router.replace(safeNext);
+        const { data: userRes, error: getUserErr } = await supabase.auth.getUser();
+        if (!getUserErr && userRes?.user && userRes.user.app_metadata?.role === "admin") {
+          // Get access token
+          const { data: sessRes } = await supabase.auth.getSession();
+          const accessToken = sessRes.session?.access_token;
+          if (!accessToken) return;
+
+          // Set server cookie so middleware lets us through
+          const res = await fetch("/api/admin/session/sync", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Cache-Control": "no-store",
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          if (res.ok && !cancelled) {
+            router.replace(safeNext);
+          }
         }
       } catch {
-        // ignore – just let the user log in
+        // ignore
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [isMounted, router, safeNext]);
 
-  // Entrance animation setup
+  // Simple entrance animation prep (unchanged)
   useEffect(() => {
     if (!isMounted) return;
     const handleVisibility = () => {
       document.querySelectorAll(".fade-in-up").forEach((el) => {
-        const rect = el.getBoundingClientRect();
+        const rect = (el as HTMLElement).getBoundingClientRect();
         if (rect.top < window.innerHeight - 100) {
           el.classList.add("animate");
         }
@@ -75,16 +85,49 @@ export default function AdminLoginPage() {
     setError("");
 
     try {
-      const res = await fetch("/api/admin/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-        credentials: "include", // set the cookie
-        body: JSON.stringify({ password: credentials.password }),
+      const email = credentials.username.trim();
+      const password = credentials.password;
+
+      const { data, error: signInErr } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setError(String(data?.error || "Invalid username or password"));
+      if (signInErr) {
+        setError(signInErr.message || "Invalid email or password");
+        return;
+      }
+
+      const role = data.user?.app_metadata?.role;
+      if (role !== "admin") {
+        setError("This account is not authorized for admin access.");
+        await supabase.auth.signOut().catch(() => {});
+        return;
+      }
+
+      // Get the access token (prefer from the sign-in result; fallback to getSession)
+      const accessToken =
+        data.session?.access_token ||
+        (await supabase.auth.getSession()).data.session?.access_token;
+
+      if (!accessToken) {
+        setError("Could not finalize session (no access token).");
+        return;
+      }
+
+      // Ask the server to set the opaque admin_session cookie (middleware depends on this).
+      const syncRes = await fetch("/api/admin/session/sync", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Cache-Control": "no-store",
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!syncRes.ok) {
+        const j = await syncRes.json().catch(() => ({}));
+        setError(String(j?.error || "Could not finalize session."));
         return;
       }
 
@@ -107,7 +150,7 @@ export default function AdminLoginPage() {
 
       {/* Animated particles */}
       <div className="absolute inset-0">
-        {[...Array(20)].map((_, i) => (
+        {Array.from({ length: 20 }).map((_, i) => (
           <div
             key={i}
             className="absolute w-2 h-2 bg-white/20 rounded-full animate-bounce"
@@ -121,16 +164,10 @@ export default function AdminLoginPage() {
         ))}
       </div>
 
-      {/* Floating geometric shapes */}
+      {/* Floating shapes */}
       <div className="absolute top-20 left-20 w-32 h-32 bg-white/5 rounded-full blur-xl animate-pulse" />
-      <div
-        className="absolute bottom-20 right-20 w-24 h-24 bg-white/5 rounded-full blur-xl animate-pulse"
-        style={{ animationDelay: "1s" }}
-      />
-      <div
-        className="absolute top-1/2 left-10 w-16 h-16 bg-white/5 rounded-full blur-xl animate-pulse"
-        style={{ animationDelay: "2s" }}
-      />
+      <div className="absolute bottom-20 right-20 w-24 h-24 bg-white/5 rounded-full blur-xl animate-pulse" style={{ animationDelay: "1s" }} />
+      <div className="absolute top-1/2 left-10 w-16 h-16 bg-white/5 rounded-full blur-xl animate-pulse" style={{ animationDelay: "2s" }} />
 
       <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
         <div className="w-full max-w-md">
@@ -168,15 +205,15 @@ export default function AdminLoginPage() {
 
                   <div className="space-y-3">
                     <Label htmlFor="username" className="text-white font-medium">
-                      Username
+                      Email
                     </Label>
                     <div className="relative">
                       <User className="absolute left-4 top-4 h-5 w-5 text-white/60" />
                       <Input
                         id="username"
                         name="username"
-                        type="text"
-                        placeholder="Enter username"
+                        type="email"
+                        placeholder="Enter email"
                         value={credentials.username}
                         onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                         className="pl-12 h-14 btn-3d glass-effect-dark text-white placeholder:text-white/50 border-white/20"
