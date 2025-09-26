@@ -101,6 +101,73 @@ function toLocalISO(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/* ---- Formatting + WhatsApp message builder (NEW) ---- */
+function formatFJD(n: number) {
+  return `${Number(n || 0).toFixed(0)} FJD`;
+}
+
+function buildWhatsAppMessage(opts: {
+  bookingCode?: string | null;
+  vehicleName?: string;
+  vehicleCategory?: string;
+  vehicleReg?: string;
+  pickupDate?: Date;
+  pickupTime?: string;
+  returnDate?: Date;
+  dropoffTime?: string;
+  pickupLocation?: string;
+  pickupFee?: number;
+  dropoffLocation?: string;
+  dropoffFee?: number;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  notes?: string;
+  total?: number;
+}) {
+  const {
+    bookingCode,
+    vehicleName, vehicleCategory, vehicleReg,
+    pickupDate, pickupTime,
+    returnDate, dropoffTime,
+    pickupLocation, pickupFee,
+    dropoffLocation, dropoffFee,
+    customerName, customerPhone, customerEmail,
+    notes,
+    total,
+  } = opts;
+
+  const when = (pickupDate && returnDate)
+    ? `${format(pickupDate, "PPP")} • ${pickupTime} → ${format(returnDate, "PPP")} • ${dropoffTime}`
+    : "";
+
+  const lines = [
+    "Hi Bakers Rentals, Below are my Booking Details with my Payment attached.",
+    "",
+    bookingCode ? `Booking Code: ${bookingCode}` : undefined,
+    vehicleName
+      ? `Vehicle: ${vehicleName}${vehicleCategory ? ` (${vehicleCategory})` : ""}${vehicleReg ? ` — Reg: ${vehicleReg}` : ""}`
+      : undefined,
+    when ? `Dates: ${when}` : undefined,
+    pickupLocation != null
+      ? `Pickup: ${pickupLocation}${pickupFee ? ` (+$${pickupFee})` : " (Free)"}`
+      : undefined,
+    dropoffLocation != null
+      ? `Drop-off: ${dropoffLocation}${dropoffFee ? ` (+$${dropoffFee})` : " (Free)"}`
+      : undefined,
+    customerName ? `Customer: ${customerName}` : undefined,
+    customerPhone ? `Phone: ${customerPhone}` : undefined,
+    customerEmail ? `Email: ${customerEmail}` : undefined,
+    total != null ? `Total Quote: $${formatFJD(total)}` : undefined,
+    notes ? `Notes: ${notes}` : undefined,
+    "",
+    "Please attach your payment before sending. Thank you!",
+  ].filter(Boolean);
+
+  const text = lines.join("\n");
+  return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`;
+}
+
 /* ---------------- Env for WhatsApp CTA (client-safe NEXT_PUBLIC_*) -------- */
 const WHATSAPP_PHONE =
   (process.env.NEXT_PUBLIC_WHATSAPP_PHONE || "").replace(/\D/g, "") || "6790000000";
@@ -202,7 +269,12 @@ export default function BookingPage() {
     const load = async () => {
       const { data, error } = await supabase
         .from("vehicles")
-        .select("id, title, category, rental_price, rental_price_5plus, rental_price_8plus, available")
+        .select(`
+          id, title, category,
+          rental_price, rental_price_5plus, rental_price_8plus,
+          available,
+          registration_number
+        `)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -227,7 +299,7 @@ export default function BookingPage() {
           fuel: "",
           image: null,
           imagePath: null,
-          licensePlate: "",
+          licensePlate: v.registration_number ?? "", // NEW: use for WA message
           features: [],
           year: 0,
         })) || [];
@@ -552,9 +624,26 @@ export default function BookingPage() {
 
   /* ---------------- SUCCESS SCREEN ---------------- */
   if (showSuccess) {
-    const waHref = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(
-      `${WHATSAPP_MSG_PREFIX} ${bookingCode || ""}`
-    )}`;
+    // NEW: detailed WhatsApp message with all booking details (incl. reg #)
+    const waHref = buildWhatsAppMessage({
+      bookingCode,
+      vehicleName: selectedVehicleData?.name,
+      vehicleCategory: selectedVehicleData?.category,
+      vehicleReg: selectedVehicleData?.licensePlate,
+      pickupDate,
+      pickupTime,
+      returnDate,
+      dropoffTime,
+      pickupLocation,
+      pickupFee,
+      dropoffLocation,
+      dropoffFee,
+      customerName: customerInfo.name,
+      customerPhone: customerInfo.phone,
+      customerEmail: customerInfo.email,
+      notes: customerInfo.notes,
+      total: calculateTotal(),
+    });
 
     // bond math for dialog
     const totalNow = calculateTotal(); // includes location fees
