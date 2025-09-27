@@ -1,9 +1,24 @@
 // lib/supabaseAdmin.ts
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // server-only
+// Guard against missing env on the server
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-export const supabaseAdmin = createClient(url, serviceRoleKey, {
-  auth: { persistSession: false },
-});
+if (!url) throw new Error("Missing env NEXT_PUBLIC_SUPABASE_URL");
+if (!serviceRoleKey) throw new Error("Missing env SUPABASE_SERVICE_ROLE_KEY");
+
+/**
+ * Singleton admin client (service role) — server-only.
+ * Never expose the service role key to the client.
+ */
+let _admin: SupabaseClient | null = null;
+
+export const supabaseAdmin: SupabaseClient = (() => {
+  if (_admin) return _admin;
+  _admin = createClient(url, serviceRoleKey, {
+    auth: { persistSession: false },
+    global: { headers: { "X-Client-Info": "bakers-rentals-admin" } },
+  });
+  return _admin;
+})();

@@ -1,5 +1,5 @@
 // lib/waba.ts
-// Minimal WhatsApp Cloud API helpers
+// WhatsApp Cloud API helpers (text + interactive buttons)
 
 const GRAPH_API_VERSION = "v23.0"; // keep in sync with your webhook/test UI version
 const BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
@@ -19,7 +19,7 @@ async function postJSON<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${ACCESS_TOKEN}`,
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -56,4 +56,81 @@ export async function sendText(toE164Digits: string, body: string) {
   };
 
   return postJSON<any>(url, payload);
+}
+
+/** Button definition for interactive messages */
+export type WabaButton = {
+  /** Developer-defined payload we get back in the webhook on click */
+  id: string;
+  /** What the user sees on the button (WABA hard limit ~20 chars) */
+  title: string;
+};
+
+/**
+ * Send up to 3 interactive reply buttons in one message.
+ * - `headerText` is optional (short, ~60 chars).
+ * - `bodyText` is the main copy (limit ~1024 chars).
+ * - `buttons` shows up to 3 reply buttons (each title ~20 chars).
+ */
+export async function sendButtons(
+  toE164Digits: string,
+  bodyText: string,
+  buttons: WabaButton[],
+  headerText?: string
+) {
+  requireEnv("WABA_PHONE_NUMBER_ID", PHONE_NUMBER_ID);
+
+  const url = `${BASE}/${PHONE_NUMBER_ID}/messages`;
+
+  const shaped = buttons.slice(0, 3).map((b) => ({
+    type: "reply",
+    reply: {
+      id: b.id,
+      title: b.title.slice(0, 20), // enforce WA UI limit
+    },
+  }));
+
+  const payload: any = {
+    messaging_product: "whatsapp",
+    to: toE164Digits,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText.slice(0, 1024) },
+      action: { buttons: shaped },
+    },
+  };
+
+  if (headerText) {
+    payload.interactive.header = {
+      type: "text",
+      text: headerText.slice(0, 60),
+    };
+  }
+
+  return postJSON<any>(url, payload);
+}
+
+/**
+ * Convenience: send the owner a 2-button Approve/Decline prompt
+ * for a specific booking.
+ */
+export async function sendOwnerApprovalButtons(params: {
+  ownerPhoneE164Digits: string;
+  bookingId: string; // internal UUID/id
+  bookingCode: string; // human code like BR-123456
+  summaryText: string; // short summary: dates/vehicle/amount
+}) {
+  const { ownerPhoneE164Digits, bookingId, bookingCode, summaryText } = params;
+
+  const header = `Booking ${bookingCode}`;
+  const body =
+    `${summaryText}\n\nChoose an action:`.slice(0, 1024);
+
+  const buttons: WabaButton[] = [
+    { id: `confirm:${bookingId}`, title: "Confirm ✅" },
+    { id: `decline:${bookingId}`, title: "Decline ❌" },
+  ];
+
+  return sendButtons(ownerPhoneE164Digits, body, buttons, header);
 }
