@@ -174,6 +174,12 @@ export async function POST(req: Request) {
         if (ch.field !== "messages") continue;
 
         const value = ch.value || {};
+
+        // TEMP LOG: delivery statuses/errors for outbound messages
+        if (Array.isArray(value.statuses) && value.statuses.length) {
+          console.log("[WA STATUS]", JSON.stringify(value.statuses, null, 2));
+        }
+
         const messages: any[] = value.messages || [];
         const contacts: any[] = value.contacts || [];
         // const metadata = value.metadata || {}; // contains phone_number_id, display_phone_number, etc.
