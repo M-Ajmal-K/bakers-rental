@@ -175,9 +175,10 @@ export async function POST(req: Request) {
 
         const value = ch.value || {};
 
-        // TEMP LOG: delivery statuses/errors for outbound messages
-        if (Array.isArray(value.statuses) && value.statuses.length) {
-          console.log("[WA STATUS]", JSON.stringify(value.statuses, null, 2));
+        // Full delivery-status log for outbound messages
+        const statuses: any[] = Array.isArray(value.statuses) ? value.statuses : [];
+        if (statuses.length) {
+          console.log("[WA STATUS FULL]", JSON.stringify(statuses, null, 2));
         }
 
         const messages: any[] = value.messages || [];
