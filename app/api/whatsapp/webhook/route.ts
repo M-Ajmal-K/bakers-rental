@@ -22,10 +22,13 @@ function digits(input?: string | null) {
   return (input || "").replace(/\D/g, "");
 }
 
-/** Extract first booking code like BR-123456 from text */
+/**
+ * Extract first booking code from text.
+ * Accepts: BR-1234, BR 1234, br-000123, etc. (3–8 digits) and normalizes to BR-<digits>.
+ */
 function extractBookingCode(text: string): string | null {
-  const m = text?.match(/\bBR-\d{6}\b/i);
-  return m ? m[0].toUpperCase() : null;
+  const m = text?.match(/\bBR[ -]?(\d{3,8})\b/i);
+  return m ? `BR-${m[1]}`.toUpperCase() : null;
 }
 
 /** Format short summary for owner */
