@@ -8,9 +8,7 @@ const ACCESS_TOKEN = process.env.WABA_ACCESS_TOKEN || "";
 const PHONE_NUMBER_ID = process.env.WABA_PHONE_NUMBER_ID || "";
 
 function requireEnv(name: string, value: string) {
-  if (!value) {
-    throw new Error(`Missing required env: ${name}`);
-  }
+  if (!value) throw new Error(`Missing required env: ${name}`);
 }
 
 async function postJSON<T>(url: string, body: unknown): Promise<T> {
@@ -23,9 +21,10 @@ async function postJSON<T>(url: string, body: unknown): Promise<T> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    cache: "no-store",
   });
 
-  const data = (await res.json()) as any;
+  const data = (await res.json().catch(() => ({}))) as any;
 
   if (!res.ok) {
     // Surface WABA error details if present
@@ -35,19 +34,20 @@ async function postJSON<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
+/* ------------------------------------------------------------------ */
+/* Basic senders                                                       */
+/* ------------------------------------------------------------------ */
+
 /**
  * Send a plain text message via WhatsApp Cloud API.
  * Notes:
  * - For non-template outbound messages, the recipient must have
  *   recently messaged your business (24h session window).
- * - For testing, send "hi" from that phone to your business number first,
- *   or use a template message instead.
  */
 export async function sendText(toE164Digits: string, body: string) {
   requireEnv("WABA_PHONE_NUMBER_ID", PHONE_NUMBER_ID);
 
   const url = `${BASE}/${PHONE_NUMBER_ID}/messages`;
-
   const payload = {
     messaging_product: "whatsapp",
     to: toE164Digits, // digits only, no '+'
@@ -56,6 +56,13 @@ export async function sendText(toE164Digits: string, body: string) {
   };
 
   return postJSON<any>(url, payload);
+}
+
+/**
+ * Exported alias — some places prefer this name.
+ */
+export async function sendPlainText(toE164Digits: string, text: string) {
+  return sendText(toE164Digits, text);
 }
 
 /** Button definition for interactive messages */
@@ -111,25 +118,28 @@ export async function sendButtons(
   return postJSON<any>(url, payload);
 }
 
+/* ------------------------------------------------------------------ */
+/* Owner approval flow helper                                          */
+/* ------------------------------------------------------------------ */
+
 /**
  * Convenience: send the owner a 2-button Approve/Decline prompt
  * for a specific booking.
  */
 export async function sendOwnerApprovalButtons(params: {
-  ownerPhoneE164Digits: string;
-  bookingId: string; // internal UUID/id
-  bookingCode: string; // human code like BR-123456
-  summaryText: string; // short summary: dates/vehicle/amount
+  ownerPhoneE164Digits: string; // e.g. "6792813118"
+  bookingId: string;            // internal UUID/id
+  bookingCode: string;          // human code like BR-123456
+  summaryText: string;          // short summary: dates/vehicle/locations/etc.
 }) {
   const { ownerPhoneE164Digits, bookingId, bookingCode, summaryText } = params;
 
-  const header = `Booking ${bookingCode}`;
-  const body =
-    `${summaryText}\n\nChoose an action:`.slice(0, 1024);
+  const header = `Booking ${bookingCode}`.slice(0, 60);
+  const body = `${summaryText}\n\nTap a button:`.slice(0, 1024);
 
   const buttons: WabaButton[] = [
-    { id: `confirm:${bookingId}`, title: "Confirm ✅" },
-    { id: `decline:${bookingId}`, title: "Decline ❌" },
+    { id: `confirm:${bookingId}`, title: "✅ Confirm" },
+    { id: `decline:${bookingId}`, title: "❌ Decline" },
   ];
 
   return sendButtons(ownerPhoneE164Digits, body, buttons, header);
