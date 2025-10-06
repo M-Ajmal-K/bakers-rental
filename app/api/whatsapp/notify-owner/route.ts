@@ -34,7 +34,7 @@ function formatOwnerSummary(booking: any, vehicle?: any) {
     booking?.total_price != null ? Number(booking.total_price) : null;
 
   const vehicleStr = vehicle
-    ? `${vehicle.title || vehicle.name || "Vehicle"}${
+    ? `${vehicle.title || "Vehicle"}${
         vehicle.registration_number ? ` (${vehicle.registration_number})` : ""
       }`
     : "Vehicle";
@@ -84,7 +84,7 @@ async function loadByCodeOrId(input: { code?: string; id?: string }) {
   if (booking.vehicle_id) {
     const { data: v, error: vErr } = await supabaseAdmin
       .from("vehicles")
-      .select("id, title, registration_number, name")
+      .select("id, title, registration_number") // <- removed `name`
       .eq("id", booking.vehicle_id)
       .maybeSingle();
     if (vErr) throw vErr;
