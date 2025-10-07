@@ -1,7 +1,7 @@
 // app/api/whatsapp/notify-owner/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendOwnerApprovalButtons, sendPlainText } from "@/lib/waba";
+import { sendOwnerApprovalButtons, sendText } from "@/lib/waba";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,7 +84,7 @@ async function loadByCodeOrId(input: { code?: string; id?: string }) {
   if (booking.vehicle_id) {
     const { data: v, error: vErr } = await supabaseAdmin
       .from("vehicles")
-      .select("id, title, registration_number") // <- removed `name`
+      .select("id, title, registration_number")
       .eq("id", booking.vehicle_id)
       .maybeSingle();
     if (vErr) throw vErr;
@@ -99,7 +99,7 @@ async function doNotify(input: { code?: string; id?: string }) {
 
   const { booking, vehicle } = await loadByCodeOrId(input);
   if (!booking) {
-    await sendPlainText(
+    await sendText(
       OWNER_PHONE,
       `ℹ️ No booking found for ${input.code || input.id}`
     );
@@ -108,7 +108,7 @@ async function doNotify(input: { code?: string; id?: string }) {
 
   // Optional guard: only ping owner if still pending
   if (booking.status && booking.status !== "pending") {
-    await sendPlainText(
+    await sendText(
       OWNER_PHONE,
       `ℹ️ ${booking.code} is already ${booking.status}.`
     );

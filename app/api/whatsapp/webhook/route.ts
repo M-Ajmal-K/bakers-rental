@@ -1,7 +1,7 @@
 // app/api/whatsapp/webhook/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendText, sendOwnerApprovalButtons } from "@/lib/waba";
+import { sendText, sendOwnerApprovalButtons, sendImageById } from "@/lib/waba";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -167,9 +167,6 @@ export async function POST(req: Request) {
     const payload = await req.json().catch(() => null);
     if (!payload) return NextResponse.json({ ok: true });
 
-    // WhatsApp wraps events like:
-    // { object: "whatsapp_business_account",
-    //   entry: [ { changes: [ { field: "messages", value: {...} } ] } ] }
     const entries: any[] = payload.entry || [];
     for (const entry of entries) {
       const changes: any[] = entry.changes || [];
@@ -178,30 +175,24 @@ export async function POST(req: Request) {
 
         const value = ch.value || {};
 
-        // Full delivery-status log for outbound messages
+        // Log delivery-status updates for debugging
         const statuses: any[] = Array.isArray(value.statuses) ? value.statuses : [];
         if (statuses.length) {
           console.log("[WA STATUS FULL]", JSON.stringify(statuses, null, 2));
         }
 
         const messages: any[] = value.messages || [];
-        const contacts: any[] = value.contacts || [];
-        // const metadata = value.metadata || {}; // contains phone_number_id, display_phone_number, etc.
 
         for (const msg of messages) {
-          // 1) Button reply (owner tapped Confirm/Decline)
-          //    Depending on WA, this can be:
-          //    - msg.type === "button" with msg.button.payload
-          //    - msg.type === "interactive" with msg.interactive.button_reply.id
+          // 1) Owner clicking an interactive button (Confirm/Decline)
           const buttonPayload =
             msg?.button?.payload ||
             msg?.interactive?.button_reply?.id ||
             null;
 
           if (buttonPayload) {
-            // Only process if the click came from the OWNER phone
+            // Only trust owner's clicks
             if (!isFromOwner(msg)) {
-              // Ignore silently (or log if needed)
               continue;
             }
 
@@ -211,7 +202,6 @@ export async function POST(req: Request) {
             const action = m[1] as "confirm" | "decline";
             const bookingId = m[2];
 
-            // Load booking (for customer notify & code)
             const { data: booking, error } = await supabaseAdmin
               .from("bookings")
               .select(
@@ -247,21 +237,45 @@ export async function POST(req: Request) {
               );
             }
 
-            continue; // proceed to next message
+            continue; // next message
           }
 
-          // 2) Customer text → detect booking code and DM owner buttons
-          const type = msg.type;
+          // 2) Customer message (text and/or image)
           const from = digits(msg.from || "");
+          const type = msg.type;
+
+          // Grab text from different shapes
           const textBody =
-            type === "text" ? (msg.text?.body || "") :
-            type === "interactive" ? (msg?.interactive?.list_reply?.title || msg?.interactive?.button_reply?.title || "") :
-            "";
+            type === "text"
+              ? (msg.text?.body || "")
+              : type === "interactive"
+              ? (msg?.interactive?.list_reply?.title || msg?.interactive?.button_reply?.title || "")
+              : type === "image"
+              ? (msg?.image?.caption || "")
+              : "";
 
-          if (!textBody) continue;
+          // If there is an image, forward it to owner immediately (so they can see the receipt),
+          // regardless of whether we recognized a code. We'll try to parse code from caption too.
+          const incomingImageId: string | undefined =
+            type === "image" ? msg?.image?.id : undefined;
 
-          const code = extractBookingCode(textBody);
-          if (!code) continue; // ignore unrelated chat
+          if (incomingImageId) {
+            const caption = textBody || `Image from ${from}`;
+            // This re-sends the MEDIA by ID to the owner (no re-upload).
+            await sendImageById(
+              OWNER_PHONE,
+              incomingImageId,
+              `Payment image from ${from}${extractBookingCode(caption) ? ` • ${extractBookingCode(caption)}` : ""}`
+            );
+          }
+
+          // Try extract booking code from whatever text we have (plain text or image caption).
+          const code = extractBookingCode(textBody || "");
+          if (!code) {
+            // No recognizable booking code; you might choose to alert owner here,
+            // but we'll stay silent to avoid noise.
+            continue;
+          }
 
           // Load booking by code
           const { booking, vehicle } = await loadBookingByCode(code);
@@ -273,7 +287,7 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // Basic guard: make sure it’s still pending (you can relax if you like)
+          // Basic guard: ensure it's pending (or relax if you want)
           if (booking.status && booking.status !== "pending") {
             await sendText(
               OWNER_PHONE,
@@ -290,7 +304,7 @@ export async function POST(req: Request) {
             summaryText: summary,
           });
 
-          // (Optional) Auto-reply to customer that the payment is under review
+          // Auto-ack to customer
           await sendText(
             from,
             `Thanks! We’ve received your message for booking ${booking.code}. An agent will confirm shortly.`
