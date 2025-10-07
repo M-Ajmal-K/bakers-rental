@@ -14,7 +14,20 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import { Car, Calendar, Edit, Trash2, LogOut, Filter, Eye, Phone, Mail, IdCard } from "lucide-react";
+import {
+  Car,
+  Calendar,
+  Edit,
+  Trash2,
+  LogOut,
+  Filter,
+  Eye,
+  Phone,
+  Mail,
+  IdCard,
+  LayoutGrid,
+  List as ListIcon,
+} from "lucide-react";
 import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
 
@@ -56,7 +69,7 @@ interface Booking {
   licensePath?: string | null;
 }
 
-/* ---------------- Mobile card for bookings (UI unchanged) ----------------- */
+/* ---------------- Mobile card for bookings (made more compact) ------------ */
 const MobileBookingCard = memo(function MobileBookingCard({
   booking,
   onView,
@@ -79,38 +92,44 @@ const MobileBookingCard = memo(function MobileBookingCard({
   const isPending = String(booking.status).toLowerCase() === "pending";
 
   return (
-    <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10">
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm text-white/70">{format(new Date(booking.createdAt), "MMM dd, yyyy")}</p>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-semibold text-white">{booking.bookingRef}</h3>
+    <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10 overflow-hidden">
+      <CardContent className="p-3 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] text-white/70 leading-none">
+              {format(new Date(booking.createdAt), "MMM dd, yyyy")}
+            </p>
+            <div className="mt-1 flex items-center gap-1.5 min-w-0">
+              <h3 className="text-sm font-semibold text-white truncate max-w-[180px]">
+                {booking.bookingRef}
+              </h3>
               {booking.licensePath ? (
-                <Badge className="bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30">
+                <Badge className="bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30 px-1 py-0 h-5 text-[10px]">
                   License
                 </Badge>
               ) : null}
             </div>
           </div>
-          {getStatusBadge(String(booking.status))}
+          <div className="shrink-0">{getStatusBadge(String(booking.status))}</div>
         </div>
 
-        <div className="text-sm text-white/80 space-y-1">
-          <p className="font-medium text-white">{booking.customerName}</p>
+        <div className="text-[13px] text-white/80 space-y-0.5">
+          <p className="font-medium text-white truncate">{booking.customerName}</p>
           <p className="truncate">{booking.customerEmail}</p>
           <p className="truncate">{booking.customerPhone}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="bg-white/5 rounded p-2">
+        <div className="grid grid-cols-2 gap-2 text-[12px]">
+          <div className="bg-white/5 rounded p-2 min-w-0">
             <p className="text-white/60">Vehicle</p>
-            <p className="font-medium text-white">{booking.vehicleName}</p>
-            {booking.vehiclePlate && <p className="text-white/70 text-xs mt-0.5">Plate: {booking.vehiclePlate}</p>}
+            <p className="font-medium text-white truncate">{booking.vehicleName}</p>
+            {booking.vehiclePlate && (
+              <p className="text-white/70 text-[11px] mt-0.5 truncate">Plate: {booking.vehiclePlate}</p>
+            )}
           </div>
           <div className="bg-white/5 rounded p-2">
             <p className="text-white/60">Amount</p>
-            <p className="font-semibold text-white">${booking.totalAmount}</p>
+            <p className="font-semibold text-white truncate">${booking.totalAmount}</p>
           </div>
           <div className="bg-white/5 rounded p-2 col-span-2">
             <p className="text-white/60">Dates</p>
@@ -120,17 +139,17 @@ const MobileBookingCard = memo(function MobileBookingCard({
               {calculateDays(booking.pickupDate, booking.returnDate) !== 1 ? "s" : ""}
             </p>
           </div>
-          <div className="bg-white/5 rounded p-2">
+          <div className="bg-white/5 rounded p-2 min-w-0">
             <p className="text-white/60">Pickup</p>
             <p className="text-white truncate">{booking.pickupLocation}</p>
           </div>
-          <div className="bg-white/5 rounded p-2">
+          <div className="bg-white/5 rounded p-2 min-w-0">
             <p className="text-white/60">Drop-off</p>
             <p className="text-white truncate">{booking.dropoffLocation}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             variant="outline"
             size="sm"
@@ -176,6 +195,96 @@ const MobileBookingCard = memo(function MobileBookingCard({
   );
 });
 
+/* ---------------- Compact mobile LIST row (new) --------------------------- */
+const MobileBookingListRow = memo(function MobileBookingListRow({
+  booking,
+  onView,
+  onDelete,
+  getStatusBadge,
+  calculateDays,
+  onViewLicense,
+  onEdit,
+  onConfirmed,
+}: {
+  booking: Booking;
+  onView: (b: Booking) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  getStatusBadge: (s: string) => JSX.Element;
+  calculateDays: (a: string, b: string) => number;
+  onViewLicense: (b: Booking) => void;
+  onEdit: (b: Booking) => void;
+  onConfirmed: (id: string) => void;
+}) {
+  const isPending = String(booking.status).toLowerCase() === "pending";
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-3 bg-white/[0.03] ring-1 ring-white/10 rounded-lg">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-white truncate max-w-[160px]">{booking.bookingRef}</p>
+          {booking.licensePath ? (
+            <Badge className="bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30 px-1 py-0 h-5 text-[10px]">
+              License
+            </Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-white/70">{format(new Date(booking.createdAt), "MMM dd, yyyy")}</p>
+        <p className="text-[13px] text-white/90 truncate">{booking.customerName} • {booking.vehicleName}</p>
+        <p className="text-[12px] text-white/70">
+          {format(new Date(booking.pickupDate), "MMM dd")} – {format(new Date(booking.returnDate), "MMM dd")} ·{" "}
+          {calculateDays(booking.pickupDate, booking.returnDate)}d • ${booking.totalAmount}
+        </p>
+      </div>
+
+      <div className="shrink-0 flex flex-col items-end gap-2">
+        <div>{getStatusBadge(String(booking.status))}</div>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onView(booking)}
+            className="h-8 w-8 bg-white/5 hover:bg-white/10 border-white/10 text-white"
+            title="View"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {booking.licensePath ? (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => onViewLicense(booking)}
+              className="h-8 w-8 bg-white/5 hover:bg-white/10 border-white/10 text-white"
+              title="License"
+            >
+              <IdCard className="h-4 w-4" />
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onEdit(booking)}
+            className="h-8 w-8 bg-white/5 hover:bg-white/10 border-white/10 text-white"
+            title="Edit"
+          >
+            <Edit className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onDelete(booking.id)}
+            className="h-8 w-8 bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+          {isPending && (
+            <ConfirmBookingButton id={booking.id} onDone={() => onConfirmed(booking.id)} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 /* -------------------------------------------------------------------------- */
 /*                           Main content (admin UI)                           */
 /* -------------------------------------------------------------------------- */
@@ -199,6 +308,9 @@ function BookingManagementContent() {
   const [licenseUrl, setLicenseUrl] = useState<string | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseError, setLicenseError] = useState<string | null>(null);
+
+  // NEW: mobile view mode toggle ('cards' | 'list')
+  const [mobileView, setMobileView] = useState<"cards" | "list">("cards");
 
   useEffect(() => {
     const activate = () => {
@@ -315,7 +427,7 @@ function BookingManagementContent() {
   const handleUpdateBooking = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBooking) return;
-    const updated = { ...selectedBooking, status: editFormData.status, notes: editFormData.notes };
+    const updated = { ...selectedBooking, status: editFormData.status, notes: selectedBooking.notes };
     setBookings((prev) => prev.map((b) => (b.id === selectedBooking.id ? updated : b)));
     setIsEditDialogOpen(false);
     setSelectedBooking(null);
@@ -379,7 +491,7 @@ function BookingManagementContent() {
     try {
       const res = await fetch(`/api/admin/bookings/license-url?path=${encodeURIComponent(booking.licensePath)}`, {
         method: "GET",
-               credentials: "include",
+        credentials: "include",
         cache: "no-store",
         headers: { "Cache-Control": "no-store" },
       });
@@ -452,14 +564,46 @@ function BookingManagementContent() {
             </div>
           )}
 
-          {/* Filters */}
+          {/* Filters + Mobile view toggle */}
           <div className="fade-in-up mb-6 md:mb-8" style={{ animationDelay: "0.2s" }}>
             <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10">
               <CardHeader className="pb-3 md:pb-4">
-                <CardTitle className="flex items-center gap-2 md:gap-3 text-white text-lg md:text-xl">
-                  <Filter className="h-5 w-5 md:h-6 md:w-6 text-white" />
-                  Advanced Filters
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 md:gap-3 text-white text-lg md:text-xl">
+                    <Filter className="h-5 w-5 md:h-6 md:w-6 text-white" />
+                    Advanced Filters
+                  </CardTitle>
+
+                  {/* Mobile-only view toggle */}
+                  <div className="md:hidden flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant={mobileView === "cards" ? "default" : "outline"}
+                      onClick={() => setMobileView("cards")}
+                      className={`h-9 px-3 ${
+                        mobileView === "cards"
+                          ? "bg-white/20 text-white border-white/20"
+                          : "bg-white/5 text-white border-white/10 hover:bg-white/10"
+                      }`}
+                      title="Cards view"
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={mobileView === "list" ? "default" : "outline"}
+                      onClick={() => setMobileView("list")}
+                      className={`h-9 px-3 ${
+                        mobileView === "list"
+                          ? "bg-white/20 text-white border-white/20"
+                          : "bg-white/5 text-white border-white/10 hover:bg-white/10"
+                      }`}
+                      title="List view"
+                    >
+                      <ListIcon className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col md:flex-row gap-4 md:gap-6">
@@ -497,21 +641,42 @@ function BookingManagementContent() {
             </Card>
           </div>
 
-          {/* Mobile list */}
-          <div className="grid gap-4 md:hidden">
-            {filteredBookings.map((booking) => (
-              <MobileBookingCard
-                key={booking.id}
-                booking={booking}
-                onView={handleViewBooking}
-                onEdit={handleEditBooking}
-                onDelete={handleDeleteBooking}
-                onConfirmed={markConfirmed}
-                onViewLicense={handleViewLicense}
-                getStatusBadge={getStatusBadge}
-                calculateDays={calculateDays}
-              />
-            ))}
+          {/* Mobile: Cards or List (toggle) */}
+          <div className="md:hidden">
+            {mobileView === "cards" ? (
+              <div className="grid gap-3">
+                {filteredBookings.map((booking) => (
+                  <MobileBookingCard
+                    key={booking.id}
+                    booking={booking}
+                    onView={handleViewBooking}
+                    onEdit={handleEditBooking}
+                    onDelete={handleDeleteBooking}
+                    onConfirmed={markConfirmed}
+                    onViewLicense={handleViewLicense}
+                    getStatusBadge={getStatusBadge}
+                    calculateDays={calculateDays}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {filteredBookings.map((booking) => (
+                  <MobileBookingListRow
+                    key={booking.id}
+                    booking={booking}
+                    onView={handleViewBooking}
+                    onDelete={handleDeleteBooking}
+                    getStatusBadge={getStatusBadge}
+                    calculateDays={calculateDays}
+                    onViewLicense={handleViewLicense}
+                    onEdit={handleEditBooking}
+                    onConfirmed={markConfirmed}
+                  />
+                ))}
+              </div>
+            )}
+
             {!loading && filteredBookings.length === 0 && (
               <div className="text-center py-12">
                 <Calendar className="h-12 w-12 text-white/40 mx-auto mb-3" />
@@ -772,9 +937,7 @@ function BookingManagementContent() {
 
               <div className="min-h-[200px] flex items-center justify-center">
                 {licenseLoading && <p className="text-white/70">Loading license…</p>}
-                {!licenseLoading && licenseError && (
-                  <p className="text-red-200 text-sm">{licenseError}</p>
-                )}
+                {!licenseLoading && licenseError && <p className="text-red-200 text-sm">{licenseError}</p>}
                 {!licenseLoading && !licenseError && licenseUrl && (
                   <div className="w-full">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
