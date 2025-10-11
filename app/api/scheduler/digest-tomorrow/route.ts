@@ -7,6 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TZ = "Pacific/Fiji";
+const SEND_HOUR_LOCAL = 15;          // 3 PM Fiji
+const SEND_WINDOW_MINUTES = 15;      // allow 3:00–3:14 PM window
 
 /** digits-only helper */
 function digits(s?: string | null) {
@@ -20,9 +22,22 @@ function formatYMDInTZ(d: Date, timeZone: string) {
   return fmt.format(d);
 }
 
+/** tz-aware "now" */
+function nowInTZ(timeZone: string) {
+  return new Date(new Date().toLocaleString("en-US", { timeZone }));
+}
+
+/** Is it within the send window (3:00–3:14 PM Fiji)? */
+function isInSendWindow() {
+  const now = nowInTZ(TZ);
+  const h = now.getHours();
+  const m = now.getMinutes();
+  return h === SEND_HOUR_LOCAL && m < SEND_WINDOW_MINUTES;
+}
+
 /** Get today/tomorrow strings in Pacific/Fiji */
 function getTodayTomorrowStrings() {
-  const now = new Date();
+  const now = nowInTZ(TZ);
   const todayStr = formatYMDInTZ(now, TZ);
 
   const tomorrow = new Date(now);
@@ -289,6 +304,7 @@ async function handleDigest({ dryRunTo }: { dryRunTo?: string }) {
     ok: true,
     date: tomorrowStr,
     preview: text,
+    recipients,
     delivered_to: deliveries,
   };
 }
@@ -313,9 +329,29 @@ export async function GET(req: Request) {
 }
 
 /* ----------------------------- POST (cron) ------------------------------ */
-/** Vercel cron will call this with POST and no body */
-export async function POST() {
+/**
+ * Configure your cron to hit this route **hourly** (e.g. "0 * * * *").
+ * This POST handler sends only during the Fiji 3:00–3:14 PM window.
+ * You can override the guard with ?force=1 in the POST URL if needed.
+ */
+export async function POST(req: Request) {
   try {
+    const url = new URL(req.url);
+    const force = url.searchParams.get("force");
+
+    const now = nowInTZ(TZ);
+    if (!force && !isInSendWindow()) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "Outside 3pm Fiji window",
+        now_fiji_iso: now.toISOString(),
+        hour_local: now.getHours(),
+        minute_local: now.getMinutes(),
+        tz: TZ,
+      });
+    }
+
     const result = await handleDigest({}); // use env recipients
     return NextResponse.json(result);
   } catch (e: any) {
