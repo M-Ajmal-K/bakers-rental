@@ -17,6 +17,7 @@ import {
   MapPin,
   User,
   Clock,
+  Plane, // NEW: for flight number
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
@@ -39,6 +40,7 @@ type BookingRow = {
   license_url: string | null;
   pickup_time: string | null; // "HH:MM:SS" or null
   dropoff_time: string | null; // "HH:MM:SS" or null
+  flight_number?: string | null; // NEW
   _vehicle?: {
     id: string;
     title: string;
@@ -61,6 +63,7 @@ type UnifiedTask = {
   fromLocation: string; // where staff picks the vehicle
   toLocation: string; // where staff drops the vehicle next
   bufferMinutes?: number; // only when both end & start same day for same vehicle
+  flightNumber?: string | null; // NEW
 };
 
 type ViewKey = "today" | "tomorrow" | "dayAfter";
@@ -305,6 +308,7 @@ function DashboardContent() {
         fromLocation: from,
         toLocation: to,
         bufferMinutes: buffer,
+        flightNumber: startB.flight_number ?? null, // NEW
       });
     }
 
@@ -324,6 +328,7 @@ function DashboardContent() {
         customerEmail: endB.email,
         fromLocation: endB.dropoff_location,
         toLocation: "(Depot / As arranged)",
+        flightNumber: endB.flight_number ?? null, // NEW
       });
     }
 
@@ -544,7 +549,8 @@ function DashboardContent() {
           <div className="fade-in-up" style={{ animationDelay: "0.8s" }}>
             <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/20">
               <CardHeader className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
+                {/* Responsive header: buttons wrap on mobile */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <CardTitle className="text-white text-2xl">
                     Tasks
                     {activeDateLabel && (
@@ -552,8 +558,8 @@ function DashboardContent() {
                     )}
                   </CardTitle>
 
-                  {/* Toggle buttons */}
-                  <div className="flex items-center gap-2">
+                  {/* Toggle buttons (wrap on small screens) */}
+                  <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                     {/* TODAY */}
                     <Button
                       size="sm"
@@ -638,6 +644,12 @@ function DashboardContent() {
                           </a>
                         )}
                         {t.customerEmail && <div className="text-white/60 text-xs">{t.customerEmail}</div>}
+                        {t.flightNumber && (
+                          <div className="text-white/70 text-xs mt-1 flex items-center gap-1.5">
+                            <Plane className="h-3.5 w-3.5" />
+                            Flight: {t.flightNumber}
+                          </div>
+                        )}
 
                         <div className="mt-3 grid grid-cols-1 gap-2">
                           <div className="text-white/80 text-sm flex items-start gap-2">
@@ -710,6 +722,11 @@ function DashboardContent() {
                               )}
                               {t.customerEmail && (
                                 <div className="text-white/60 text-xs">{t.customerEmail}</div>
+                              )}
+                              {t.flightNumber && (
+                                <div className="text-white/70 text-xs flex items-center gap-1.5 mt-0.5">
+                                  <Plane className="h-3.5 w-3.5" /> Flight: {t.flightNumber}
+                                </div>
                               )}
                             </td>
                             <td className="px-3 py-3 align-top">
