@@ -245,6 +245,7 @@ export default function BookingPage() {
     phone: "",
     email: "",
     notes: "",
+    flightNumber: "", // <-- NEW
   });
   const [showSummary, setShowSummary] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -586,6 +587,8 @@ export default function BookingPage() {
         customer_name: customerInfo.name,
         contact_number: customerInfo.phone,
         email: customerInfo.email,
+        // NEW: pass flight number to the API/DB (nullable)
+        flight_number: customerInfo.flightNumber?.trim() || null,
         total_price: vehicleSubtotal, // <-- vehicle-only; server computes final total
       };
 
@@ -857,7 +860,7 @@ export default function BookingPage() {
               <Sparkles className="h-5 w-5 md:h-6 md:w-6 text-primary animate-pulse" style={{ animationDelay: "0.5s" }} />
             </div>
           </div>
-          <h1 className="text-2xl md:text-4xl font-bold text-foreground mb-3 md:mb-4">Booking Created!</h1>
+          <h1 className="text-2xl md:4xl font-bold text-foreground mb-3 md:mb-4">Booking Created!</h1>
           {pickupDate && returnDate && (
             <p className="text-sm md:text-base text-muted-foreground mb-2">
               {format(pickupDate, "PPP")} • {pickupTime} → {format(returnDate, "PPP")} • {dropoffTime}
@@ -1007,6 +1010,9 @@ export default function BookingPage() {
                           <p className="flex justify-between"><span className="text-muted-foreground">Name:</span><span className="font-medium">{customerInfo.name}</span></p>
                           <p className="flex justify-between"><span className="text-muted-foreground">Phone:</span><span className="font-medium">{customerInfo.phone}</span></p>
                           <p className="flex justify-between"><span className="text-muted-foreground">Email:</span><span className="font-medium">{customerInfo.email}</span></p>
+                          {customerInfo.flightNumber && (
+                            <p className="flex justify-between"><span className="text-muted-foreground">Flight Number:</span><span className="font-medium">{customerInfo.flightNumber}</span></p>
+                          )}
                           {licenseFile && (
                             <p className="flex justify-between">
                               <span className="text-muted-foreground">License file:</span>
@@ -1391,6 +1397,21 @@ export default function BookingPage() {
                       <div className="space-y-2.5 md:space-y-3">
                         <Label htmlFor="email" className="text-sm md:text-base font-medium">Email Address</Label>
                         <Input id="email" type="email" placeholder="your.email@example.com" value={customerInfo.email} onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })} required className="h-11 md:h-12 btn-3d text-sm md:text-base" />
+                      </div>
+
+                      {/* Flight number (optional) */}
+                      <div className="space-y-2.5 md:space-y-3">
+                        <Label htmlFor="flight-number" className="text-sm md:text-base font-medium">Flight Number (Optional)</Label>
+                        <Input
+                          id="flight-number"
+                          placeholder="e.g., FJ 411"
+                          value={customerInfo.flightNumber}
+                          onChange={(e) => setCustomerInfo({ ...customerInfo, flightNumber: e.target.value })}
+                          className="h-11 md:h-12 btn-3d text-sm md:text-base"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          If you’re flying in, sharing your flight number helps us time the pickup perfectly.
+                        </p>
                       </div>
 
                       {/* Driver's License upload */}

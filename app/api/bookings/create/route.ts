@@ -51,6 +51,9 @@ type Payload = {
    * If client sends grand total by mistake, we still overwrite with our final calc.
    */
   total_price?: number | null;
+
+  // NEW — flight number from the booking form
+  flight_number?: string | null;
 };
 
 // Helpers
@@ -91,6 +94,14 @@ function compareLocalDateAndTimes(
   const ta = a.getTime();
   const tb = b.getTime();
   return ta < tb ? -1 : ta > tb ? 1 : 0;
+}
+
+// NEW: keep flight number tidy (e.g., "FJ123", "QF-391")
+function normalizeFlightNumber(s?: string | null) {
+  const v = (s ?? "").toUpperCase().trim();
+  // allow letters, numbers, space and dash only
+  const cleaned = v.replace(/[^A-Z0-9\- ]/g, "");
+  return cleaned.length ? cleaned : null;
 }
 
 export async function POST(req: Request) {
@@ -135,6 +146,7 @@ export async function POST(req: Request) {
     total_price = 0, // treat as vehicle-only subtotal
     pickup_time,
     dropoff_time,
+    flight_number, // NEW
   } = body || ({} as Payload);
 
   // minimal validation
@@ -224,6 +236,8 @@ export async function POST(req: Request) {
     pickup_fee_fjd: pickupFeeFjd,
     dropoff_fee_fjd: dropoffFeeFjd,
     status: "pending",
+    // NEW: persist flight number
+    flight_number: normalizeFlightNumber(flight_number),
   };
 
   const { data: inserted, error: insertError } = await supabase

@@ -65,6 +65,9 @@ interface Booking {
   createdAt: string;
   notes: string;
 
+  // NEW: flight number from DB
+  flightNumber?: string | null;
+
   // NEW: path stored in DB (private bucket key)
   licensePath?: string | null;
 }
@@ -117,6 +120,9 @@ const MobileBookingCard = memo(function MobileBookingCard({
           <p className="font-medium text-white truncate">{booking.customerName}</p>
           <p className="truncate">{booking.customerEmail}</p>
           <p className="truncate">{booking.customerPhone}</p>
+          {booking.flightNumber ? (
+            <p className="truncate">Flight: {booking.flightNumber}</p>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-[12px]">
@@ -233,6 +239,9 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
           {format(new Date(booking.pickupDate), "MMM dd")} – {format(new Date(booking.returnDate), "MMM dd")} ·{" "}
           {calculateDays(booking.pickupDate, booking.returnDate)}d • ${booking.totalAmount}
         </p>
+        {booking.flightNumber ? (
+          <p className="text-[12px] text-white/70 truncate">Flight: {booking.flightNumber}</p>
+        ) : null}
       </div>
 
       <div className="shrink-0 flex flex-col items-end gap-2">
@@ -372,6 +381,9 @@ function BookingManagementContent() {
             status: String(r.status ?? "pending").toLowerCase(),
             createdAt: created,
             notes: r.notes ?? "",
+
+            // NEW: map flight number from API/DB
+            flightNumber: r.flight_number ?? null,
 
             // NEW: carry through the storage object path from DB
             licensePath: r.license_url ?? null,
@@ -703,6 +715,7 @@ function BookingManagementContent() {
                         <TableHead className="text-white/80">Customer</TableHead>
                         <TableHead className="text-white/80">Vehicle</TableHead>
                         <TableHead className="text-white/80">Plate</TableHead>
+                        <TableHead className="text-white/80">Flight</TableHead>
                         <TableHead className="text-white/80">Dates</TableHead>
                         <TableHead className="text-white/80">Amount</TableHead>
                         <TableHead className="text-white/80">Status</TableHead>
@@ -740,6 +753,9 @@ function BookingManagementContent() {
                             </TableCell>
                             <TableCell>
                               <p className="text-white">{booking.vehiclePlate || "-"}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-white">{booking.flightNumber || "-"}</p>
                             </TableCell>
                             <TableCell>
                               <div className="text-sm">
@@ -867,6 +883,11 @@ function BookingManagementContent() {
                           <Phone className="h-4 w-4 text-white/70" />
                           {selectedBooking.customerPhone}
                         </p>
+                        {selectedBooking.flightNumber ? (
+                          <p>
+                            <span className="text-white/70">Flight:</span> {selectedBooking.flightNumber}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </div>
