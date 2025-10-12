@@ -40,8 +40,7 @@ function getTodayTomorrowStrings() {
   const now = nowInTZ(TZ);
   const todayStr = formatYMDInTZ(now, TZ);
 
-  const tomorrow = new Date(now);
-  // Add 1 day in tz-aware way: loop forward until the YMD string changes
+  // Add 1 day in tz-aware way: loop forward until YMD changes
   let probe = new Date(now);
   do {
     probe = new Date(probe.getTime() + 60 * 60 * 1000); // +1h
@@ -58,13 +57,14 @@ type BookingRow = {
   customer_name: string | null;
   contact_number: string | null;
   email: string | null;
+  flight_number?: string | null;  // <— added
   vehicle_id: string | null;
   pickup_location: string | null;
   dropoff_location: string | null;
   start_date: string | null;   // YYYY-MM-DD
   end_date: string | null;     // YYYY-MM-DD
-  pickup_time: string | null;  // HH:mm
-  dropoff_time: string | null; // HH:mm
+  pickup_time: string | null;  // HH:mm or HH:mm:ss
+  dropoff_time: string | null; // HH:mm or HH:mm:ss
   total_price: number | null;
   license_url?: string | null;
 };
@@ -77,18 +77,16 @@ async function fetchDigestData() {
   const { data: rows, error } = await supabaseAdmin
     .from("bookings")
     .select(
-      "id, code, status, customer_name, contact_number, email, vehicle_id, pickup_location, dropoff_location, start_date, end_date, pickup_time, dropoff_time, total_price, license_url"
+      "id, code, status, customer_name, contact_number, email, flight_number, vehicle_id, pickup_location, dropoff_location, start_date, end_date, pickup_time, dropoff_time, total_price, license_url"
     )
     .or(`start_date.eq.${tomorrowStr},end_date.eq.${tomorrowStr}`);
 
   if (error) throw error;
 
-  // Also pull bookings that end today (to compute MOVE/CLEAN against tomorrow)
+  // Also pull bookings that end today (to compute 'from' when a vehicle drops and starts again tomorrow)
   const { data: todayEnd, error: err2 } = await supabaseAdmin
     .from("bookings")
-    .select(
-      "id, code, status, vehicle_id, dropoff_location, end_date, dropoff_time"
-    )
+    .select("id, code, status, vehicle_id, dropoff_location, end_date, dropoff_time")
     .eq("end_date", todayStr);
 
   if (err2) throw err2;
@@ -118,7 +116,130 @@ async function fetchDigestData() {
   };
 }
 
-/** Detect simplistic conflicts for tomorrow: overlapping same-vehicle bookings */
+/** utils */
+function toHm(timeStr?: string | null) {
+  if (!timeStr) return null;
+  const [hh, mm] = timeStr.split(":");
+  return `${hh}:${mm}`;
+}
+
+/** Unified task type (like admin dashboard) */
+type UnifiedTaskType = "Deliver" | "Pick up";
+type UnifiedTask = {
+  type: UnifiedTaskType;
+  time: string; // HH:MM
+  bookingId: string;
+  bookingCode: string;
+  vehicleTitle: string;
+  plate: string;
+  customerName: string;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  flightNumber: string | null;
+  fromLocation: string;
+  toLocation: string;
+};
+
+/** Build the same task list the admin dashboard shows, but for tomorrow */
+function buildUnifiedTasksForTomorrow(
+  ymd: string,
+  rows: BookingRow[],
+  vehicles: Record<string, { title: string; registration_number: string | null }>
+): UnifiedTask[] {
+  const rowsStart = rows.filter(r => r.start_date === ymd);
+  const rowsEnd = rows.filter(r => r.end_date === ymd);
+
+  // index by vehicle for this date
+  const endByVeh = new Map<string, BookingRow[]>();
+  rowsEnd.forEach(b => {
+    const list = endByVeh.get(b.vehicle_id || "_") || [];
+    list.push(b);
+    endByVeh.set(b.vehicle_id || "_", list);
+  });
+
+  const startByVeh = new Map<string, BookingRow[]>();
+  rowsStart.forEach(b => {
+    const list = startByVeh.get(b.vehicle_id || "_") || [];
+    list.push(b);
+    startByVeh.set(b.vehicle_id || "_", list);
+  });
+
+  const defaultPickupTime = "09:00";
+  const defaultDropoffTime = "17:00";
+
+  const tasks: UnifiedTask[] = [];
+
+  // Deliver rows for START bookings
+  for (const s of rowsStart) {
+    const veh = s.vehicle_id ? vehicles[s.vehicle_id] : undefined;
+    const vehTitle = veh?.title || "Vehicle";
+    const plate = veh?.registration_number || "";
+
+    const sameDayEnds = (endByVeh.get(s.vehicle_id || "_") || []).sort((a, b) =>
+      (a.dropoff_time || "").localeCompare(b.dropoff_time || "")
+    );
+    const prevEnd = sameDayEnds[0]; // mirrors admin logic
+
+    const startAt = toHm(s.pickup_time) || defaultPickupTime;
+
+    const from = prevEnd ? (prevEnd.dropoff_location || "(Depot / As arranged)") : "(Depot / As arranged)";
+    const to = s.pickup_location || "(As arranged)";
+
+    tasks.push({
+      type: "Deliver",
+      time: startAt,
+      bookingId: s.id,
+      bookingCode: s.code || s.id.slice(0, 8).toUpperCase(),
+      vehicleTitle: vehTitle,
+      plate,
+      customerName: s.customer_name || "",
+      customerPhone: s.contact_number || null,
+      customerEmail: s.email || null,
+      flightNumber: s.flight_number ?? null,
+      fromLocation: from,
+      toLocation: to,
+    });
+  }
+
+  // Pick-up only rows for END bookings without a START on same day
+  for (const e of rowsEnd) {
+    const hasStartSameDay = (startByVeh.get(e.vehicle_id || "_") || []).length > 0;
+    if (hasStartSameDay) continue; // represented by a Deliver task already
+
+    const veh = e.vehicle_id ? vehicles[e.vehicle_id] : undefined;
+    const vehTitle = veh?.title || "Vehicle";
+    const plate = veh?.registration_number || "";
+
+    const endAt = toHm(e.dropoff_time) || defaultDropoffTime;
+
+    tasks.push({
+      type: "Pick up",
+      time: endAt,
+      bookingId: e.id,
+      bookingCode: e.code || e.id.slice(0, 8).toUpperCase(),
+      vehicleTitle: vehTitle,
+      plate,
+      customerName: e.customer_name || "",
+      customerPhone: e.contact_number || null,
+      customerEmail: e.email || null,
+      flightNumber: e.flight_number ?? null,
+      fromLocation: e.dropoff_location || "(As arranged)",
+      toLocation: "(Depot / As arranged)",
+    });
+  }
+
+  // Sort by time asc, then Pick up before Deliver when same time
+  tasks.sort((a, b) => {
+    const t = a.time.localeCompare(b.time);
+    if (t !== 0) return t;
+    if (a.type === b.type) return 0;
+    return a.type === "Pick up" ? -1 : 1;
+  });
+
+  return tasks;
+}
+
+/** Optional: detect simplistic conflicts for tomorrow: overlapping same-vehicle bookings */
 function computeConflicts(tomorrowRows: BookingRow[]) {
   const byVeh: Record<string, BookingRow[]> = {};
   for (const r of tomorrowRows) {
@@ -144,148 +265,73 @@ function computeConflicts(tomorrowRows: BookingRow[]) {
   return conflicts;
 }
 
-/** Compute logistics MOVE/CLEAN */
-function computeLogistics(todayEnd: BookingRow[], tomorrowRows: BookingRow[]) {
-  const moves: string[] = [];
-  const cleans: string[] = [];
-
-  // map last known drop-off today by vehicle
-  const lastDropByVehicle = new Map<string, { where: string | null; time: string | null }>();
-  for (const r of todayEnd) {
-    if (!r.vehicle_id) continue;
-    const prev = lastDropByVehicle.get(r.vehicle_id);
-    // keep the latest drop-off time if multiple
-    if (!prev || (r.dropoff_time || "00:00") > (prev.time || "00:00")) {
-      lastDropByVehicle.set(r.vehicle_id, { where: r.dropoff_location || null, time: r.dropoff_time || null });
-    }
-  }
-
-  // For each pickup tomorrow, compare locations & gaps
-  const byVehTomorrow = new Map<string, BookingRow[]>();
-  for (const r of tomorrowRows) {
-    if (!r.vehicle_id) continue;
-    const list = byVehTomorrow.get(r.vehicle_id) || [];
-    list.push(r);
-    byVehTomorrow.set(r.vehicle_id, list);
-  }
-
-  for (const [vehId, list] of byVehTomorrow) {
-    const sorted = list.slice().sort((a, b) => (a.pickup_time || "00:00").localeCompare(b.pickup_time || "00:00"));
-    const first = sorted[0];
-
-    // MOVE check: yesterday/today drop-off → first pickup location tomorrow
-    const lastDrop = lastDropByVehicle.get(vehId);
-    if (lastDrop) {
-      const from = (lastDrop.where || "").trim();
-      const to = (first.pickup_location || "").trim();
-      if (from && to && from.toLowerCase() !== to.toLowerCase()) {
-        moves.push(`${vehId}: ${from} → ${to}`);
-      }
-    }
-
-    // CLEAN check: gap between drop-off and next pickup *tomorrow*
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const A = sorted[i];
-      const B = sorted[i + 1];
-      const aEnd = A.dropoff_time || "00:00";
-      const bStart = B.pickup_time || "23:59";
-      // crude hour gap parse
-      const [ah, am] = aEnd.split(":").map(Number);
-      const [bh, bm] = bStart.split(":").map(Number);
-      const gapMinutes = (bh * 60 + bm) - (ah * 60 + am);
-      if (gapMinutes > 0 && gapMinutes < 360) { // < 6h
-        cleans.push(`${A.code} → ${B.code} (gap ${Math.floor(gapMinutes / 60)}h)`);
-      }
-    }
-  }
-
-  return { moves, cleans };
-}
-
-/** Build the WhatsApp digest text */
+/** Build the WhatsApp digest text — unified "Tasks" section like Admin */
 function buildDigestText(args: {
   dateStr: string;
   rowsTomorrow: BookingRow[];
   vehicles: Record<string, { title: string; registration_number: string | null }>;
-  todayEnd: BookingRow[];
 }) {
-  const { dateStr, rowsTomorrow, vehicles, todayEnd } = args;
+  const { dateStr, rowsTomorrow, vehicles } = args;
 
-  const pickups = rowsTomorrow.filter(r => r.start_date === dateStr);
-  const dropoffs = rowsTomorrow.filter(r => r.end_date === dateStr);
-  const pending = rowsTomorrow.filter(r => (r.status || "pending").toLowerCase() === "pending");
-
+  const tasks = buildUnifiedTasksForTomorrow(dateStr, rowsTomorrow, vehicles);
   const conflicts = computeConflicts(rowsTomorrow);
-  const { moves, cleans } = computeLogistics(todayEnd, rowsTomorrow);
+
+  const prettyDate = new Date(dateStr).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 
   const lines: string[] = [];
-  lines.push(`Tomorrow (${new Date(dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })})`);
-
-  // Pickups
+  lines.push(`Tomorrow (${prettyDate})`);
   lines.push("");
-  lines.push("Pickups");
-  if (pickups.length === 0) lines.push("• —");
-  for (const r of pickups.sort((a,b)=> (a.pickup_time||"").localeCompare(b.pickup_time||""))) {
-    const v = r.vehicle_id ? vehicles[r.vehicle_id] : undefined;
-    const car = v ? `${v.title}${v.registration_number ? ` (${v.registration_number})` : ""}` : "Vehicle";
-    const flags: string[] = [];
-    if ((r.status || "pending").toLowerCase() === "pending") flags.push("PENDING");
-    if (!r.license_url) flags.push("LICENSE?");
-    lines.push(
-      `• ${r.pickup_time || "--:--"} ${r.code} — ${car} — ${r.pickup_location || "-"} — ${r.customer_name || ""}${flags.length ? `  [${flags.join("][")}]` : ""}`
-    );
+  lines.push("Tasks");
+
+  if (tasks.length === 0) {
+    lines.push("• —");
+  } else {
+    for (const t of tasks) {
+      const car = t.plate ? `${t.vehicleTitle} (${t.plate})` : t.vehicleTitle;
+      const custBits = [
+        t.customerName || "",
+        t.customerPhone || "",
+        t.customerEmail || "",
+      ].filter(Boolean).join(" • ");
+
+      lines.push(`• ${t.time} ${t.type} — ${t.bookingCode}`);
+      lines.push(`  Car: ${car}`);
+      if (custBits) lines.push(`  Customer: ${custBits}`);
+      if (t.flightNumber) lines.push(`  Flight: ${t.flightNumber}`);
+      lines.push(`  From: ${t.fromLocation}`);
+      lines.push(`  To: ${t.toLocation}`);
+    }
   }
 
-  // Drop-offs
-  lines.push("");
-  lines.push("Drop-offs");
-  if (dropoffs.length === 0) lines.push("• —");
-  for (const r of dropoffs.sort((a,b)=> (a.dropoff_time||"").localeCompare(b.dropoff_time||""))) {
-    const v = r.vehicle_id ? vehicles[r.vehicle_id] : undefined;
-    const car = v ? `${v.title}${v.registration_number ? ` (${v.registration_number})` : ""}` : "Vehicle";
-    lines.push(
-      `• ${r.dropoff_time || "--:--"} ${r.code} — ${car} — ${r.dropoff_location || "-"}`
-    );
-  }
-
-  // Logistics
-  if (moves.length || cleans.length) {
-    lines.push("");
-    lines.push("Logistics");
-    for (const m of moves) lines.push(`• MOVE ${m}`);
-    for (const c of cleans) lines.push(`• CLEAN ${c}`);
-  }
-
-  // Conflicts
   if (conflicts.length) {
     lines.push("");
     lines.push("Conflicts");
     for (const c of conflicts) lines.push(`• ${c}`);
   }
 
-  // Pending summary
-  if (pending.length) {
-    lines.push("");
-    lines.push("Action Needed");
-    for (const r of pending) lines.push(`• ${r.code} (${r.customer_name || ""}) is still pending`);
-  }
-
-  return lines.join("\n").slice(0, 3500); // keep under WA text limits
+  // keep comfortably below WA text limits
+  return lines.join("\n").slice(0, 3500);
 }
 
 /** Core handler used by GET/POST */
 async function handleDigest({ dryRunTo }: { dryRunTo?: string }) {
-  const { todayStr, tomorrowStr, rows, todayEnd, vehicles } = await fetchDigestData();
+  const { tomorrowStr, rows, vehicles } = await fetchDigestData();
 
   const text = buildDigestText({
     dateStr: tomorrowStr,
     rowsTomorrow: rows,
     vehicles,
-    todayEnd,
   });
 
   // choose recipients
-  const preset = (process.env.WABA_DIGEST_RECIPIENTS || "").split(",").map(digits).filter(Boolean);
+  const preset = (process.env.WABA_DIGEST_RECIPIENTS || "")
+    .split(",")
+    .map(digits)
+    .filter(Boolean);
   const recipients = dryRunTo ? [digits(dryRunTo)] : preset;
 
   const deliveries: any[] = [];
