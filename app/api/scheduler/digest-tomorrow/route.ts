@@ -381,14 +381,43 @@ async function handleDigest({ dryRunTo }: { dryRunTo?: string }) {
   };
 }
 
-/* ----------------------------- GET (manual) ----------------------------- */
-/** Test locally or from browser:
- *  /api/scheduler/digest-tomorrow?dryRun=1&to=679XXXXXXX
- *  If no query params, it will use WABA_DIGEST_RECIPIENTS env.
+/* ----------------------------- GET (manual + cron-safe) ----------------------------- */
+/** Usage:
+ *  - Manual test: /api/scheduler/digest-tomorrow?dryRun=1&to=679XXXXXXX
+ *  - Vercel Cron: /api/scheduler/digest-tomorrow?cron=1  (runs hourly)
+ *      If CRON_SECRET is set, request must include header:
+ *      Authorization: Bearer <CRON_SECRET>
+ *      And it will only send during 3:00–3:14 PM Fiji.
  */
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+    const isCron = url.searchParams.get("cron") === "1";
+
+    if (isCron) {
+      // Optional auth check if CRON_SECRET is configured
+      const header = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+      const expected = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : null;
+      if (expected && header !== expected) {
+        return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      }
+
+      // Only send during the 3pm Fiji window
+      if (!isInSendWindow()) {
+        const now = nowInTZ(TZ);
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          reason: "Outside 3pm Fiji window (cron GET)",
+          now_fiji_iso: now.toISOString(),
+          hour_local: now.getHours(),
+          minute_local: now.getMinutes(),
+          tz: TZ,
+        });
+      }
+    }
+
+    // Manual test mode (or forced cron after passing the window check)
     const dry = url.searchParams.get("dryRun");
     const to = url.searchParams.get("to") || undefined;
 
