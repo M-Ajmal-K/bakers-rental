@@ -57,7 +57,7 @@ type BookingRow = {
   customer_name: string | null;
   contact_number: string | null;
   email: string | null;
-  flight_number?: string | null;  // <— added
+  flight_number?: string | null;
   vehicle_id: string | null;
   pickup_location: string | null;
   dropoff_location: string | null;
@@ -83,7 +83,7 @@ async function fetchDigestData() {
 
   if (error) throw error;
 
-  // Also pull bookings that end today (to compute 'from' when a vehicle drops and starts again tomorrow)
+  // Also pull bookings that end today (to detect same-vehicle handoffs)
   const { data: todayEnd, error: err2 } = await supabaseAdmin
     .from("bookings")
     .select("id, code, status, vehicle_id, dropoff_location, end_date, dropoff_time")
@@ -136,8 +136,8 @@ type UnifiedTask = {
   customerPhone: string | null;
   customerEmail: string | null;
   flightNumber: string | null;
-  fromLocation: string;
-  toLocation: string;
+  fromLocation: string; // original source (used only for Pick up display)
+  toLocation: string;   // destination (used only for Deliver display)
 };
 
 /** Build the same task list the admin dashboard shows, but for tomorrow */
@@ -152,16 +152,18 @@ function buildUnifiedTasksForTomorrow(
   // index by vehicle for this date
   const endByVeh = new Map<string, BookingRow[]>();
   rowsEnd.forEach(b => {
-    const list = endByVeh.get(b.vehicle_id || "_") || [];
+    const key = b.vehicle_id || "_";
+    const list = endByVeh.get(key) || [];
     list.push(b);
-    endByVeh.set(b.vehicle_id || "_", list);
+    endByVeh.set(key, list);
   });
 
   const startByVeh = new Map<string, BookingRow[]>();
   rowsStart.forEach(b => {
-    const list = startByVeh.get(b.vehicle_id || "_") || [];
+    const key = b.vehicle_id || "_";
+    const list = startByVeh.get(key) || [];
     list.push(b);
-    startByVeh.set(b.vehicle_id || "_", list);
+    startByVeh.set(key, list);
   });
 
   const defaultPickupTime = "09:00";
@@ -182,8 +184,9 @@ function buildUnifiedTasksForTomorrow(
 
     const startAt = toHm(s.pickup_time) || defaultPickupTime;
 
-    const from = prevEnd ? (prevEnd.dropoff_location || "(Depot / As arranged)") : "(Depot / As arranged)";
-    const to = s.pickup_location || "(As arranged)";
+    // Keep raw values; we'll decide what to render in the formatter
+    const from = prevEnd?.dropoff_location || "";
+    const to = s.pickup_location || "";
 
     tasks.push({
       type: "Deliver",
@@ -223,8 +226,8 @@ function buildUnifiedTasksForTomorrow(
       customerPhone: e.contact_number || null,
       customerEmail: e.email || null,
       flightNumber: e.flight_number ?? null,
-      fromLocation: e.dropoff_location || "(As arranged)",
-      toLocation: "(Depot / As arranged)",
+      fromLocation: e.dropoff_location || "",
+      toLocation: "",
     });
   }
 
@@ -254,7 +257,6 @@ function computeConflicts(tomorrowRows: BookingRow[]) {
     const sorted = arr.slice().sort((a, b) => (a.pickup_time || "00:00").localeCompare(b.pickup_time || "00:00"));
     for (let i = 0; i < sorted.length - 1; i++) {
       const A = sorted[i], B = sorted[i + 1];
-      // consider same day; if A dropoff_time > B pickup_time, flag
       const aEnd = (A.dropoff_time || "23:59");
       const bStart = (B.pickup_time || "00:00");
       if (aEnd > bStart) {
@@ -265,7 +267,7 @@ function computeConflicts(tomorrowRows: BookingRow[]) {
   return conflicts;
 }
 
-/** Build the WhatsApp digest text — unified "Tasks" section like Admin */
+/** Build the WhatsApp digest text — unified "Tasks" section like Admin, with bold & emojis */
 function buildDigestText(args: {
   dateStr: string;
   rowsTomorrow: BookingRow[];
@@ -292,23 +294,47 @@ function buildDigestText(args: {
   } else {
     for (const t of tasks) {
       const car = t.plate ? `${t.vehicleTitle} (${t.plate})` : t.vehicleTitle;
-      const custBits = [
-        t.customerName || "",
-        t.customerPhone || "",
-        t.customerEmail || "",
-      ].filter(Boolean).join(" • ");
 
-      lines.push(`• ${t.time} ${t.type} — ${t.bookingCode}`);
-      lines.push(`  Car: ${car}`);
-      if (custBits) lines.push(`  Customer: ${custBits}`);
-      if (t.flightNumber) lines.push(`  Flight: ${t.flightNumber}`);
-      lines.push(`  From: ${t.fromLocation}`);
-      lines.push(`  To: ${t.toLocation}`);
+      // First line: bullet, time, bold task type, booking code
+      lines.push(`• 🕒 ${t.time} *${t.type}* — ${t.bookingCode}`);
+
+      // Car
+      lines.push(`  🚗 Car: ${car}`);
+
+      // Customer name (if any)
+      if (t.customerName) {
+        lines.push(`  👤 Customer: ${t.customerName}`);
+      }
+
+      // Contact (phone/email)
+      const contactBits = [t.customerPhone || "", t.customerEmail || ""].filter(Boolean).join(" · ");
+      if (contactBits) {
+        lines.push(`  ☎️ Contact: ${contactBits}`);
+      }
+
+      // Flight (if any)
+      if (t.flightNumber) {
+        lines.push(`  ✈️ Flight: ${t.flightNumber}`);
+      }
+
+      // Location(s): no depot/as-arranged fallbacks; only what matters
+      if (t.type === "Deliver") {
+        if (t.toLocation) {
+          lines.push(`  📍 To: ${t.toLocation}`);
+        }
+      } else {
+        // Pick up
+        if (t.fromLocation) {
+          lines.push(`  📍 Pick up from: ${t.fromLocation}`);
+        }
+      }
+
+      // Blank line after each task for readability
+      lines.push("");
     }
   }
 
   if (conflicts.length) {
-    lines.push("");
     lines.push("Conflicts");
     for (const c of conflicts) lines.push(`• ${c}`);
   }
