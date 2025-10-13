@@ -92,7 +92,10 @@ async function loadBookingByCode(code: string) {
 }
 
 /** Update booking status with idempotency */
-async function setBookingStatus(bookingId: string, nextStatus: "confirmed" | "declined") {
+async function setBookingStatus(
+  bookingId: string,
+  nextStatus: "confirmed" | "declined" | "pay_later"
+) {
   const { data: current, error: getErr } = await supabaseAdmin
     .from("bookings")
     .select("id, status")
@@ -102,7 +105,7 @@ async function setBookingStatus(bookingId: string, nextStatus: "confirmed" | "de
   if (!current) throw new Error("Booking not found");
 
   if (current.status === nextStatus) return { changed: false };
-  // Allow moving from pending→(confirmed|declined). If it was already something else, still set.
+  // Allow moving from pending→(confirmed|declined|pay_later). If it was already something else, still set.
   const { error: updErr } = await supabaseAdmin
     .from("bookings")
     .update({ status: nextStatus })
@@ -111,8 +114,11 @@ async function setBookingStatus(bookingId: string, nextStatus: "confirmed" | "de
   return { changed: true };
 }
 
-/** Send customer confirmation / decline message */
-async function notifyCustomer(booking: any, nextStatus: "confirmed" | "declined") {
+/** Send customer confirmation / decline / pay-later message */
+async function notifyCustomer(
+  booking: any,
+  nextStatus: "confirmed" | "declined" | "pay_later"
+) {
   const to = digits(booking.contact_number || "");
   if (!to) return;
 
@@ -122,6 +128,14 @@ async function notifyCustomer(booking: any, nextStatus: "confirmed" | "declined"
       `Pickup: ${booking.start_date || "?"} • ${booking.pickup_time || "--:--"}`,
       `Drop-off: ${booking.end_date || "?"} • ${booking.dropoff_time || "--:--"}`,
       `We look forward to seeing you. Reply here if you need anything.`,
+    ].join("\n");
+    await sendText(to, msg);
+  } else if (nextStatus === "pay_later") {
+    const msg = [
+      `📝 Booking ${booking.code} approved as *Pay Later*.`,
+      `You may settle the balance before or at pickup.`,
+      `Pickup: ${booking.start_date || "?"} • ${booking.pickup_time || "--:--"}`,
+      `If you prefer to pay a deposit now, reply with your receipt and we'll mark it confirmed.`,
     ].join("\n");
     await sendText(to, msg);
   } else {
@@ -184,7 +198,7 @@ export async function POST(req: Request) {
         const messages: any[] = value.messages || [];
 
         for (const msg of messages) {
-          // 1) Owner clicking an interactive button (Confirm/Decline)
+          // 1) Owner clicking an interactive button (Confirm/Decline/Pay Later)
           const buttonPayload =
             msg?.button?.payload ||
             msg?.interactive?.button_reply?.id ||
@@ -196,10 +210,10 @@ export async function POST(req: Request) {
               continue;
             }
 
-            const m = String(buttonPayload).match(/^(confirm|decline):(.+)$/);
+            const m = String(buttonPayload).match(/^(confirm|decline|paylater):(.+)$/);
             if (!m) continue;
 
-            const action = m[1] as "confirm" | "decline";
+            const action = m[1] as "confirm" | "decline" | "paylater";
             const bookingId = m[2];
 
             const { data: booking, error } = await supabaseAdmin
@@ -215,13 +229,16 @@ export async function POST(req: Request) {
               continue;
             }
 
-            const nextStatus = action === "confirm" ? "confirmed" : "declined";
+            const nextStatus =
+              action === "confirm" ? "confirmed" :
+              action === "decline" ? "declined" : "pay_later";
+
             try {
               const { changed } = await setBookingStatus(booking.id, nextStatus);
               if (changed) {
                 await sendText(
                   OWNER_PHONE,
-                  `✓ ${booking.code} ${nextStatus}. Customer will be notified.`
+                  `✓ ${booking.code} ${nextStatus.replace("_", " ")}. Customer will be notified.`
                 );
                 await notifyCustomer(booking, nextStatus);
               } else {

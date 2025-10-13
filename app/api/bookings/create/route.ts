@@ -20,6 +20,9 @@ function adminClient() {
   });
 }
 
+// ---- Config: fixed deposit (can override via env) ----
+const DEPOSIT_AMOUNT_FJD = Number(process.env.NEXT_PUBLIC_DEPOSIT_FJD ?? 200);
+
 // Simple GET so you can visit /api/bookings/create in the browser to verify the route is alive
 export async function GET() {
   try {
@@ -218,6 +221,8 @@ export async function POST(req: Request) {
   const dropoffFeeFjd = Number(dropRow.fee_fjd || 0);
   const finalTotal = Number(total_price || 0) + pickupFeeFjd + dropoffFeeFjd;
 
+  const balanceDueFjd = Math.max(finalTotal - DEPOSIT_AMOUNT_FJD, 0);
+
   // Insert booking
   // - Let DB generate the code via default (booking_code_seq)
   // - Use 'pending' so exclusion constraint only applies when later marked 'confirmed'
@@ -282,6 +287,25 @@ export async function POST(req: Request) {
     }
   }
 
+  // Prepare a neat WhatsApp text preview + button meta (optional for UI/webhook to use)
+  const wabaTextPreview = [
+    `New Booking Request: ${customer_name}`,
+    ``,
+    `Ref: ${inserted.code}`,
+    `Dates: ${start_date} → ${end_date}`,
+    `Pickup: ${pickupRow.name}`,
+    `Drop-off: ${dropRow.name}`,
+    pickup_time ? `Pickup Time: ${pickup_time}` : null,
+    dropoff_time ? `Drop-off Time: ${dropoff_time}` : null,
+    `Flight: ${normalizeFlightNumber(flight_number) ?? "-"}`,
+    ``,
+    `Total: FJD ${finalTotal.toFixed(2)}`,
+    `Deposit Due Now: FJD ${DEPOSIT_AMOUNT_FJD.toFixed(2)}`,
+    `Balance on Delivery: FJD ${balanceDueFjd.toFixed(2)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   // Return fee breakdown so UI can show it immediately
   return NextResponse.json(
     {
@@ -291,6 +315,41 @@ export async function POST(req: Request) {
       total_price: inserted.total_price,   // includes fees
       pickup_fee_fjd: inserted.pickup_fee_fjd,
       dropoff_fee_fjd: inserted.dropoff_fee_fjd,
+
+      // NEW: simple payment meta for UI/WhatsApp
+      payment: {
+        deposit_amount_fjd: DEPOSIT_AMOUNT_FJD,
+        balance_due_fjd: balanceDueFjd,
+      },
+
+      // NEW: optional WhatsApp bundle the UI or webhook can use to render buttons
+      waba_meta: {
+        booking_id: inserted.id,
+        booking_code: inserted.code,
+        actions: [
+          { id: "CONFIRM", title: "Confirm" },
+          { id: "PAY_LATER", title: "Pay Later" },
+          { id: "DECLINE", title: "Decline" },
+        ],
+        context: {
+          customer_name,
+          contact_number,
+          email,
+          start_date,
+          end_date,
+          pickup_location: pickupRow.name,
+          dropoff_location: dropRow.name,
+          pickup_time: pickup_time ?? null,
+          dropoff_time: dropoff_time ?? null,
+          flight_number: normalizeFlightNumber(flight_number),
+          total_fjd: finalTotal,
+          deposit_fjd: DEPOSIT_AMOUNT_FJD,
+          balance_fjd: balanceDueFjd,
+        },
+      },
+
+      // NEW: convenient plain-text preview for quick copy or templating
+      waba_text_preview: wabaTextPreview,
     },
     { status: 201 }
   );

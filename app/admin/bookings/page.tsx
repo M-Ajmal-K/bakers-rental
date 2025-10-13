@@ -1,3 +1,4 @@
+// app/admin/bookings/page.tsx
 "use client";
 
 import { useEffect, useState, memo } from "react";
@@ -47,6 +48,9 @@ const statusColors: Record<string, string> = {
 
 type BookingStatus = typeof bookingStatuses[number];
 
+// Payment types
+type PaymentStatus = "unpaid" | "deposit_paid" | "pay_later" | "paid_in_full";
+
 interface Booking {
   id: string;
   bookingRef: string;
@@ -65,12 +69,48 @@ interface Booking {
   createdAt: string;
   notes: string;
 
-  // NEW: flight number from DB
+  // flight number from DB
   flightNumber?: string | null;
 
-  // NEW: path stored in DB (private bucket key)
+  // path stored in DB (private bucket key)
   licensePath?: string | null;
+
+  // payment fields
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  depositAmount: number;
 }
+
+/* ---------------- Helpers: currency, balance, payment badge --------------- */
+const money = (n: number) =>
+  `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const calcBalance = (b: Pick<Booking, "totalAmount" | "paymentStatus" | "amountPaid" | "depositAmount">) => {
+  if (b.paymentStatus === "paid_in_full") return 0;
+  if (b.paymentStatus === "deposit_paid") return Math.max(0, b.totalAmount - b.depositAmount);
+  // unpaid or pay_later
+  return Math.max(0, b.totalAmount - (b.amountPaid || 0));
+};
+
+const paymentColors: Record<PaymentStatus, string> = {
+  unpaid: "bg-red-500/15 text-red-200 ring-1 ring-red-400/30",
+  deposit_paid: "bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30",
+  pay_later: "bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30",
+  paid_in_full: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30",
+};
+
+const paymentLabel: Record<PaymentStatus, string> = {
+  unpaid: "Unpaid",
+  deposit_paid: "Deposit paid",
+  pay_later: "Pay later",
+  paid_in_full: "Paid in full",
+};
+
+const getPaymentBadge = (s: PaymentStatus) => (
+  <Badge className={`${paymentColors[s]} capitalize`} variant="secondary">
+    {paymentLabel[s]}
+  </Badge>
+);
 
 /* ---------------- Mobile card for bookings (made more compact) ------------ */
 const MobileBookingCard = memo(function MobileBookingCard({
@@ -93,6 +133,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
   calculateDays: (a: string, b: string) => number;
 }) {
   const isPending = String(booking.status).toLowerCase() === "pending";
+  const balance = calcBalance(booking);
 
   return (
     <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10 overflow-hidden">
@@ -113,7 +154,10 @@ const MobileBookingCard = memo(function MobileBookingCard({
               ) : null}
             </div>
           </div>
-          <div className="shrink-0">{getStatusBadge(String(booking.status))}</div>
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            {getStatusBadge(String(booking.status))}
+            {getPaymentBadge(booking.paymentStatus)}
+          </div>
         </div>
 
         <div className="text-[13px] text-white/80 space-y-0.5">
@@ -134,8 +178,11 @@ const MobileBookingCard = memo(function MobileBookingCard({
             )}
           </div>
           <div className="bg-white/5 rounded p-2">
-            <p className="text-white/60">Amount</p>
-            <p className="font-semibold text-white truncate">${booking.totalAmount}</p>
+            <p className="text-white/60">Payment</p>
+            <p className="font-semibold text-white truncate">Total: {money(booking.totalAmount)}</p>
+            <p className={`text-[11px] ${balance > 0 ? "text-amber-200" : "text-emerald-200"}`}>
+              Balance: {money(balance)}
+            </p>
           </div>
           <div className="bg-white/5 rounded p-2 col-span-2">
             <p className="text-white/60">Dates</p>
@@ -222,6 +269,7 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
   onConfirmed: (id: string) => void;
 }) {
   const isPending = String(booking.status).toLowerCase() === "pending";
+  const balance = calcBalance(booking);
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-3 bg-white/[0.03] ring-1 ring-white/10 rounded-lg">
       <div className="min-w-0">
@@ -234,11 +282,14 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
           ) : null}
         </div>
         <p className="text-xs text-white/70">{format(new Date(booking.createdAt), "MMM dd, yyyy")}</p>
-        <p className="text-[13px] text-white/90 truncate">{booking.customerName} • {booking.vehicleName}</p>
+        <p className="text-[13px] text-white/90 truncate">
+          {booking.customerName} • {booking.vehicleName}
+        </p>
         <p className="text-[12px] text-white/70">
           {format(new Date(booking.pickupDate), "MMM dd")} – {format(new Date(booking.returnDate), "MMM dd")} ·{" "}
-          {calculateDays(booking.pickupDate, booking.returnDate)}d • ${booking.totalAmount}
+          {calculateDays(booking.pickupDate, booking.returnDate)}d • {money(booking.totalAmount)} · Bal {money(balance)}
         </p>
+        <div className="mt-1">{getPaymentBadge(booking.paymentStatus)}</div>
         {booking.flightNumber ? (
           <p className="text-[12px] text-white/70 truncate">Flight: {booking.flightNumber}</p>
         ) : null}
@@ -312,13 +363,13 @@ function BookingManagementContent() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // NEW: license preview dialog
+  // license preview dialog
   const [isLicenseDialogOpen, setIsLicenseDialogOpen] = useState(false);
   const [licenseUrl, setLicenseUrl] = useState<string | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseError, setLicenseError] = useState<string | null>(null);
 
-  // NEW: mobile view mode toggle ('cards' | 'list')
+  // mobile view mode toggle ('cards' | 'list')
   const [mobileView, setMobileView] = useState<"cards" | "list">("cards");
 
   useEffect(() => {
@@ -364,6 +415,15 @@ function BookingManagementContent() {
           const created = r.created_at || new Date().toISOString();
           const ref = `BK-${format(new Date(created), "yyyy")}-${String(id).slice(0, 6).toUpperCase()}`;
           const veh = r._vehicle || { title: "(Unknown Vehicle)", registration_number: "" };
+
+          // payment fields with sensible fallbacks
+          const paymentStatus: PaymentStatus =
+            (r.payment_status as PaymentStatus) ||
+            (String(r.status || "").toLowerCase() === "confirmed" ? "deposit_paid" : "unpaid");
+
+          const amountPaid = Number(r.amount_paid ?? (paymentStatus === "deposit_paid" ? 200 : 0));
+          const depositAmount = Number(r.deposit_amount ?? 200);
+
           return {
             id,
             bookingRef: ref,
@@ -382,11 +442,12 @@ function BookingManagementContent() {
             createdAt: created,
             notes: r.notes ?? "",
 
-            // NEW: map flight number from API/DB
             flightNumber: r.flight_number ?? null,
-
-            // NEW: carry through the storage object path from DB
             licensePath: r.license_url ?? null,
+
+            paymentStatus,
+            amountPaid,
+            depositAmount,
           };
         });
 
@@ -486,10 +547,22 @@ function BookingManagementContent() {
   };
 
   const markConfirmed = (id: string) => {
-    setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: "confirmed" } : b)));
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === id
+          ? {
+              ...b,
+              status: "confirmed",
+              // if confirmed, assume deposit was paid (UI-only until backend updates)
+              paymentStatus: b.paymentStatus === "unpaid" ? "deposit_paid" : b.paymentStatus,
+              amountPaid: b.amountPaid || b.depositAmount,
+            }
+          : b,
+      ),
+    );
   };
 
-  // NEW: open license dialog with signed URL
+  // license viewer
   const handleViewLicense = async (booking: Booking) => {
     if (!booking.licensePath) {
       alert("No license uploaded for this booking.");
@@ -718,6 +791,7 @@ function BookingManagementContent() {
                         <TableHead className="text-white/80">Flight</TableHead>
                         <TableHead className="text-white/80">Dates</TableHead>
                         <TableHead className="text-white/80">Amount</TableHead>
+                        <TableHead className="text-white/80">Payment</TableHead>
                         <TableHead className="text-white/80">Status</TableHead>
                         <TableHead className="text-white/80">Actions</TableHead>
                       </TableRow>
@@ -725,6 +799,7 @@ function BookingManagementContent() {
                     <TableBody>
                       {filteredBookings.map((booking) => {
                         const isPending = String(booking.status).toLowerCase() === "pending";
+                        const balance = calcBalance(booking);
                         return (
                           <TableRow key={booking.id} className="border-white/10 hover:bg-white/5">
                             <TableCell>
@@ -769,7 +844,17 @@ function BookingManagementContent() {
                                 </p>
                               </div>
                             </TableCell>
-                            <TableCell className="font-medium text-white">${booking.totalAmount}</TableCell>
+                            <TableCell className="font-medium text-white">{money(booking.totalAmount)}</TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                {getPaymentBadge(booking.paymentStatus)}
+                                <div className="text-xs text-white/80">
+                                  Paid: {money(booking.amountPaid || (booking.paymentStatus === "deposit_paid" ? booking.depositAmount : 0))}
+                                  <span className="mx-1">•</span>
+                                  Bal: <span className={`${balance > 0 ? "text-amber-200" : "text-emerald-200"}`}>{money(balance)}</span>
+                                </div>
+                              </div>
+                            </TableCell>
                             <TableCell>{getStatusBadge(String(booking.status))}</TableCell>
                             <TableCell>
                               <div className="flex items-center space-x-2">
@@ -864,7 +949,7 @@ function BookingManagementContent() {
                           {format(new Date(selectedBooking.createdAt), "PPP")}
                         </p>
                         <p>
-                          <span className="text-white/70">Total Amount:</span> ${selectedBooking.totalAmount}
+                          <span className="text-white/70">Total Amount:</span> {money(selectedBooking.totalAmount)}
                         </p>
                       </div>
                     </div>
@@ -933,6 +1018,26 @@ function BookingManagementContent() {
                     </div>
                   </div>
 
+                  {/* Payment section */}
+                  <div>
+                    <h3 className="font-semibold text-white mb-3">Payment</h3>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/70">Status:</span>
+                        {getPaymentBadge(selectedBooking.paymentStatus)}
+                      </div>
+                      <p>
+                        <span className="text-white/70">Amount Paid:</span> {money(selectedBooking.amountPaid)}
+                      </p>
+                      <p>
+                        <span className="text-white/70">Deposit:</span> {money(selectedBooking.depositAmount)}
+                      </p>
+                      <p>
+                        <span className="text-white/70">Balance:</span> {money(calcBalance(selectedBooking))}
+                      </p>
+                    </div>
+                  </div>
+
                   {selectedBooking.notes && (
                     <div>
                       <h3 className="font-semibold text-white mb-3">Special Notes</h3>
@@ -944,7 +1049,7 @@ function BookingManagementContent() {
             </DialogContent>
           </Dialog>
 
-          {/* NEW: License viewer dialog */}
+          {/* License viewer dialog */}
           <Dialog open={isLicenseDialogOpen} onOpenChange={setIsLicenseDialogOpen}>
             <DialogContent
               forceMount

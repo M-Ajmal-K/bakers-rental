@@ -104,7 +104,7 @@ export async function sendButtons(
 }
 
 /**
- * Convenience: send the owner a 2-button Approve/Decline prompt
+ * Convenience: send the owner a 3-button Approve/Pay Later/Decline prompt
  * for a specific booking.
  */
 export async function sendOwnerApprovalButtons(params: {
@@ -119,8 +119,9 @@ export async function sendOwnerApprovalButtons(params: {
   const body = `${summaryText}\n\nChoose an action:`.slice(0, 1024);
 
   const buttons: WabaButton[] = [
-    { id: `confirm:${bookingId}`, title: "Confirm ✅" },
-    { id: `decline:${bookingId}`, title: "Decline ❌" },
+    { id: `confirm:${bookingId}`,  title: "Confirm ✅" },
+    { id: `paylater:${bookingId}`, title: "Pay Later ⏳" },
+    { id: `decline:${bookingId}`,  title: "Decline ❌" },
   ];
 
   return sendButtons(ownerPhoneE164Digits, body, buttons, header);
