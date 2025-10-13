@@ -17,12 +17,14 @@ import {
   MapPin,
   User,
   Clock,
-  Plane, // NEW: for flight number
+  Plane,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
 
 /* --------------------------------- Types --------------------------------- */
+type PaymentStatus = "unpaid" | "deposit_paid" | "pay_later" | "paid_in_full";
+
 type BookingRow = {
   id: string;
   vehicle_id: string;
@@ -31,8 +33,8 @@ type BookingRow = {
   email: string | null;
   pickup_location: string;
   dropoff_location: string;
-  start_date: string; // YYYY-MM-DD (DATE)
-  end_date: string; // YYYY-MM-DD (DATE)
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
   total_price: number;
   created_at: string;
   status: string;
@@ -40,7 +42,13 @@ type BookingRow = {
   license_url: string | null;
   pickup_time: string | null; // "HH:MM:SS" or null
   dropoff_time: string | null; // "HH:MM:SS" or null
-  flight_number?: string | null; // NEW
+  flight_number?: string | null;
+
+  // payment fields from DB
+  payment_status?: PaymentStatus | null;
+  amount_paid?: number | null;
+  deposit_amount?: number | null;
+
   _vehicle?: {
     id: string;
     title: string;
@@ -60,13 +68,51 @@ type UnifiedTask = {
   customerName: string;
   customerPhone: string | null;
   customerEmail: string | null;
-  fromLocation: string; // where staff picks the vehicle
-  toLocation: string; // where staff drops the vehicle next
-  bufferMinutes?: number; // only when both end & start same day for same vehicle
-  flightNumber?: string | null; // NEW
+  fromLocation: string;
+  toLocation: string;
+  bufferMinutes?: number;
+  flightNumber?: string | null;
+
+  // payment shown on task cards
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  depositAmount: number;
+  totalPrice: number;
+  balance: number;
 };
 
 type ViewKey = "today" | "tomorrow" | "dayAfter";
+
+/* ---------------- Payment helpers ---------------- */
+const money = (n: number) =>
+  `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const calcBalance = (opts: {
+  totalPrice: number;
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  depositAmount: number;
+}) => {
+  const { totalPrice, paymentStatus, amountPaid, depositAmount } = opts;
+  if (paymentStatus === "paid_in_full") return 0;
+  if (paymentStatus === "deposit_paid") return Math.max(0, totalPrice - depositAmount);
+  // unpaid / pay_later
+  return Math.max(0, totalPrice - (amountPaid || 0));
+};
+
+const paymentColors: Record<PaymentStatus, string> = {
+  unpaid: "bg-red-500/15 text-red-200 ring-1 ring-red-400/30",
+  deposit_paid: "bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/30",
+  pay_later: "bg-yellow-500/15 text-yellow-200 ring-1 ring-yellow-400/30",
+  paid_in_full: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30",
+};
+
+const paymentLabel: Record<PaymentStatus, string> = {
+  unpaid: "Unpaid",
+  deposit_paid: "Deposit paid",
+  pay_later: "Pay later",
+  paid_in_full: "Paid in full",
+};
 
 function DashboardContent() {
   const [loading, setLoading] = useState(true);
@@ -78,9 +124,8 @@ function DashboardContent() {
   const [activeTasks, setActiveTasks] = useState<UnifiedTask[]>([]);
   const [activeDateLabel, setActiveDateLabel] = useState<string>("");
 
-  /* Auto-switch control: true until an operator clicks a day toggle */
+  /* Auto-switch control */
   const [autoEnabled, setAutoEnabled] = useState<boolean>(true);
-
   const router = useRouter();
 
   const fmtFJD = new Intl.NumberFormat("en-FJ", {
@@ -221,7 +266,7 @@ function DashboardContent() {
         const json = await res.json().catch(() => null);
         const items: BookingRow[] = Array.isArray(json?.items) ? json.items : [];
 
-        // status-normalize
+        // Only confirmed/completed
         const normalized = items.filter((r) => {
           const s = String(r.status || "").toLowerCase();
           return s === "confirmed" || s === "completed";
@@ -279,12 +324,28 @@ function DashboardContent() {
 
     const tasks: UnifiedTask[] = [];
 
+    const mapPayment = (row: BookingRow) => {
+      const paymentStatus: PaymentStatus =
+        (row.payment_status as PaymentStatus) ||
+        (String(row.status || "").toLowerCase() === "confirmed" ? "deposit_paid" : "unpaid");
+
+      const depositAmount = Number(row.deposit_amount ?? 200);
+      const amountPaid = Number(
+        row.amount_paid ?? (paymentStatus === "deposit_paid" ? depositAmount : 0),
+      );
+      const totalPrice = Number(row.total_price ?? 0);
+
+      const balance = calcBalance({ totalPrice, paymentStatus, amountPaid, depositAmount });
+
+      return { paymentStatus, amountPaid, depositAmount, totalPrice, balance };
+      };
+
     // Deliver rows for START bookings
     for (const startB of rowsStart) {
       const vehTitle = startB._vehicle?.title || "Vehicle";
       const plate = startB._vehicle?.registration_number || "";
       const prevEnds = (endByVehicle.get(startB.vehicle_id) || []).sort((a, b) =>
-        (a.dropoff_time || "").localeCompare(b.dropoff_time || "")
+        (a.dropoff_time || "").localeCompare(b.dropoff_time || ""),
       );
       const prevEnd = prevEnds[0];
 
@@ -294,6 +355,8 @@ function DashboardContent() {
 
       const from = prevEnd ? prevEnd.dropoff_location : "(Depot / As arranged)";
       const to = startB.pickup_location;
+
+      const pay = mapPayment(startB);
 
       tasks.push({
         type: "Deliver",
@@ -308,14 +371,18 @@ function DashboardContent() {
         fromLocation: from,
         toLocation: to,
         bufferMinutes: buffer,
-        flightNumber: startB.flight_number ?? null, // NEW
+        flightNumber: startB.flight_number ?? null,
+        ...pay,
       });
     }
 
     // Pure pickup rows for END bookings without a START on same day
     for (const endB of rowsEnd) {
       const hasStart = (startByVehicle.get(endB.vehicle_id) || []).length > 0;
-      if (hasStart) continue; // already represented by a Deliver row
+      if (hasStart) continue;
+
+      const pay = mapPayment(endB);
+
       tasks.push({
         type: "Pick up",
         time: toHm(endB.dropoff_time) || defaultDropoffTime,
@@ -328,7 +395,8 @@ function DashboardContent() {
         customerEmail: endB.email,
         fromLocation: endB.dropoff_location,
         toLocation: "(Depot / As arranged)",
-        flightNumber: endB.flight_number ?? null, // NEW
+        flightNumber: endB.flight_number ?? null,
+        ...pay,
       });
     }
 
@@ -342,8 +410,7 @@ function DashboardContent() {
     setActiveTasks(tasks);
   }, [activeYMD, allBookings]);
 
-  /* -------- Auto-switch view at 3pm and midnight (Fiji) --------
-     Runs ONLY while autoEnabled is true. Any manual click disables auto. */
+  /* -------- Auto-switch view at 3pm and midnight (Fiji) -------- */
   useEffect(() => {
     if (!autoEnabled) return;
 
@@ -353,15 +420,14 @@ function DashboardContent() {
       setView((prev) => (prev !== should ? should : prev));
     };
 
-    tick(); // initialize once on mount
-    const id = setInterval(tick, 60 * 1000); // check every minute
+    tick();
+    const id = setInterval(tick, 60 * 1000);
     return () => clearInterval(id);
   }, [autoEnabled]);
 
-  /* ----- Button helpers: style + manual override handler ----- */
   const selectView = (v: ViewKey) => {
     setView(v);
-    setAutoEnabled(false); // manual selection: pause auto to keep what the admin chose
+    setAutoEnabled(false);
   };
 
   const fmtBuffer = (mins?: number) => {
@@ -458,7 +524,7 @@ function DashboardContent() {
                   <CardContent className="p-6">
                     <div className="flex items-center justify-between mb-5">
                       <div
-                        className={`w-14 h-14 ${iconGradients[index % iconGradients.length]} rounded-xl flex items-center justify-center shadow-lg shadow-black/20`}
+                        className={`w-14 h-14 ${["bg-gradient-to-br from-cyan-500 to-sky-500","bg-gradient-to-br from-violet-500 to-fuchsia-500","bg-gradient-to-br from-emerald-500 to-teal-500"][index % 3]} rounded-xl flex items-center justify-center shadow-lg shadow-black/20`}
                       >
                         <stat.icon className="h-7 w-7 text-white" />
                       </div>
@@ -549,7 +615,6 @@ function DashboardContent() {
           <div className="fade-in-up" style={{ animationDelay: "0.8s" }}>
             <Card className="border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 shadow-xl shadow-black/20">
               <CardHeader className="flex flex-col gap-3">
-                {/* Responsive header: buttons wrap on mobile */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <CardTitle className="text-white text-2xl">
                     Tasks
@@ -558,9 +623,7 @@ function DashboardContent() {
                     )}
                   </CardTitle>
 
-                  {/* Toggle buttons (wrap on small screens) */}
                   <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                    {/* TODAY */}
                     <Button
                       size="sm"
                       variant={view === "today" ? "default" : "outline"}
@@ -569,12 +632,10 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => selectView("today")}
+                      onClick={() => setView("today")}
                     >
                       Today
                     </Button>
-
-                    {/* TOMORROW */}
                     <Button
                       size="sm"
                       variant={view === "tomorrow" ? "default" : "outline"}
@@ -583,12 +644,10 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => selectView("tomorrow")}
+                      onClick={() => setView("tomorrow")}
                     >
                       Tomorrow
                     </Button>
-
-                    {/* DAY AFTER */}
                     <Button
                       size="sm"
                       variant={view === "dayAfter" ? "default" : "outline"}
@@ -597,7 +656,7 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => selectView("dayAfter")}
+                      onClick={() => setView("dayAfter")}
                     >
                       Day After
                     </Button>
@@ -651,6 +710,21 @@ function DashboardContent() {
                           </div>
                         )}
 
+                        {/* Payment summary */}
+                        <div className="mt-2 text-xs">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded ${paymentColors[t.paymentStatus]} mr-2`}
+                          >
+                            {paymentLabel[t.paymentStatus]}
+                          </span>
+                          <span className="text-white/80">
+                            Paid: {money(t.amountPaid)} · Balance:{" "}
+                            <span className={t.balance > 0 ? "text-amber-200" : "text-emerald-200"}>
+                              {money(t.balance)}
+                            </span>
+                          </span>
+                        </div>
+
                         <div className="mt-3 grid grid-cols-1 gap-2">
                           <div className="text-white/80 text-sm flex items-start gap-2">
                             <MapPin className="h-4 w-4 mt-0.5" />
@@ -697,6 +771,7 @@ function DashboardContent() {
                           <th className="px-3 py-2 text-left">Pick vehicle from</th>
                           <th className="px-3 py-2 text-left">Drop vehicle to</th>
                           <th className="px-3 py-2 text-left">Buffer</th>
+                          <th className="px-3 py-2 text-left">Payment</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -743,6 +818,20 @@ function DashboardContent() {
                               <span className={`text-xs ${bufferClass(t.bufferMinutes)}`}>
                                 {t.type === "Deliver" ? fmtBuffer(t.bufferMinutes) : "—"}
                               </span>
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <div className="space-y-1">
+                                <span className={`inline-block px-2 py-0.5 rounded ${paymentColors[t.paymentStatus]}`}>
+                                  {paymentLabel[t.paymentStatus]}
+                                </span>
+                                <div className="text-xs text-white/80">
+                                  Paid: {money(t.amountPaid)} <span className="mx-1">•</span>
+                                  Balance:{" "}
+                                  <span className={t.balance > 0 ? "text-amber-200" : "text-emerald-200"}>
+                                    {money(t.balance)}
+                                  </span>
+                                </div>
+                              </div>
                             </td>
                           </tr>
                         ))}

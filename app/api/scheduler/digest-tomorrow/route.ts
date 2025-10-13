@@ -50,6 +50,36 @@ function getTodayTomorrowStrings() {
   return { todayStr, tomorrowStr };
 }
 
+/* ---------------- Payment helpers ---------------- */
+type PaymentStatus = "unpaid" | "deposit_paid" | "pay_later" | "paid_in_full";
+
+const paymentLabel: Record<PaymentStatus, string> = {
+  unpaid: "Unpaid",
+  deposit_paid: "Deposit paid",
+  pay_later: "Pay later",
+  paid_in_full: "Paid in full",
+};
+
+function calcBalance({
+  totalPrice,
+  paymentStatus,
+  amountPaid,
+  depositAmount,
+}: {
+  totalPrice: number;
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  depositAmount: number;
+}) {
+  if (paymentStatus === "paid_in_full") return 0;
+  if (paymentStatus === "deposit_paid") return Math.max(0, totalPrice - depositAmount);
+  return Math.max(0, totalPrice - (amountPaid || 0)); // unpaid / pay_later
+}
+
+const money = (n: number) =>
+  `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/* ---------------- DB row types ---------------- */
 type BookingRow = {
   id: string;
   code: string;
@@ -67,17 +97,22 @@ type BookingRow = {
   dropoff_time: string | null; // HH:mm or HH:mm:ss
   total_price: number | null;
   license_url?: string | null;
+
+  // payment fields
+  payment_status?: PaymentStatus | null;
+  amount_paid?: number | null;
+  deposit_amount?: number | null;
 };
 
 /** Fetch all bookings for today/tomorrow in one shot and vehicles used */
 async function fetchDigestData() {
   const { todayStr, tomorrowStr } = getTodayTomorrowStrings();
 
-  // Pull candidates for tomorrow pickups or drop-offs
+  // Pull candidates for tomorrow pickups or drop-offs (include payment fields)
   const { data: rows, error } = await supabaseAdmin
     .from("bookings")
     .select(
-      "id, code, status, customer_name, contact_number, email, flight_number, vehicle_id, pickup_location, dropoff_location, start_date, end_date, pickup_time, dropoff_time, total_price, license_url"
+      "id, code, status, customer_name, contact_number, email, flight_number, vehicle_id, pickup_location, dropoff_location, start_date, end_date, pickup_time, dropoff_time, total_price, license_url, payment_status, amount_paid, deposit_amount"
     )
     .or(`start_date.eq.${tomorrowStr},end_date.eq.${tomorrowStr}`);
 
@@ -138,6 +173,13 @@ type UnifiedTask = {
   flightNumber: string | null;
   fromLocation: string; // original source (used only for Pick up display)
   toLocation: string;   // destination (used only for Deliver display)
+
+  // payment
+  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  depositAmount: number;
+  totalPrice: number;
+  balance: number;
 };
 
 /** Build the same task list the admin dashboard shows, but for tomorrow */
@@ -169,6 +211,22 @@ function buildUnifiedTasksForTomorrow(
   const defaultPickupTime = "09:00";
   const defaultDropoffTime = "17:00";
 
+  const mapPayment = (row: BookingRow) => {
+    const statusStr = String(row.status || "").toLowerCase();
+    const paymentStatus: PaymentStatus =
+      (row.payment_status as PaymentStatus) ||
+      (statusStr === "confirmed" ? "deposit_paid" : "unpaid");
+
+    const depositAmount = Number(row.deposit_amount ?? 200);
+    const amountPaid = Number(
+      row.amount_paid ?? (paymentStatus === "deposit_paid" ? depositAmount : 0)
+    );
+    const totalPrice = Number(row.total_price ?? 0);
+    const balance = calcBalance({ totalPrice, paymentStatus, amountPaid, depositAmount });
+
+    return { paymentStatus, amountPaid, depositAmount, totalPrice, balance };
+  };
+
   const tasks: UnifiedTask[] = [];
 
   // Deliver rows for START bookings
@@ -184,9 +242,10 @@ function buildUnifiedTasksForTomorrow(
 
     const startAt = toHm(s.pickup_time) || defaultPickupTime;
 
-    // Keep raw values; we'll decide what to render in the formatter
     const from = prevEnd?.dropoff_location || "";
     const to = s.pickup_location || "";
+
+    const pay = mapPayment(s);
 
     tasks.push({
       type: "Deliver",
@@ -201,6 +260,7 @@ function buildUnifiedTasksForTomorrow(
       flightNumber: s.flight_number ?? null,
       fromLocation: from,
       toLocation: to,
+      ...pay,
     });
   }
 
@@ -215,6 +275,8 @@ function buildUnifiedTasksForTomorrow(
 
     const endAt = toHm(e.dropoff_time) || defaultDropoffTime;
 
+    const pay = mapPayment(e);
+
     tasks.push({
       type: "Pick up",
       time: endAt,
@@ -228,6 +290,7 @@ function buildUnifiedTasksForTomorrow(
       flightNumber: e.flight_number ?? null,
       fromLocation: e.dropoff_location || "",
       toLocation: "",
+      ...pay,
     });
   }
 
@@ -267,7 +330,7 @@ function computeConflicts(tomorrowRows: BookingRow[]) {
   return conflicts;
 }
 
-/** Build the WhatsApp digest text — unified "Tasks" section like Admin, with bold & emojis */
+/** Build the WhatsApp digest text — unified "Tasks" section with payment info */
 function buildDigestText(args: {
   dateStr: string;
   rowsTomorrow: BookingRow[];
@@ -301,7 +364,7 @@ function buildDigestText(args: {
       // Car
       lines.push(`  🚗 Car: ${car}`);
 
-      // Customer name (if any)
+      // Customer
       if (t.customerName) {
         lines.push(`  👤 Customer: ${t.customerName}`);
       }
@@ -312,21 +375,21 @@ function buildDigestText(args: {
         lines.push(`  ☎️ Contact: ${contactBits}`);
       }
 
-      // Flight (if any)
+      // Flight
       if (t.flightNumber) {
         lines.push(`  ✈️ Flight: ${t.flightNumber}`);
       }
 
-      // Location(s): no depot/as-arranged fallbacks; only what matters
+      // Payment
+      lines.push(
+        `  💳 Payment: ${paymentLabel[t.paymentStatus]} · Paid ${money(t.amountPaid)} · Bal ${money(t.balance)}`
+      );
+
+      // Location(s)
       if (t.type === "Deliver") {
-        if (t.toLocation) {
-          lines.push(`  📍 To: ${t.toLocation}`);
-        }
+        if (t.toLocation) lines.push(`  📍 To: ${t.toLocation}`);
       } else {
-        // Pick up
-        if (t.fromLocation) {
-          lines.push(`  📍 Pick up from: ${t.fromLocation}`);
-        }
+        if (t.fromLocation) lines.push(`  📍 Pick up from: ${t.fromLocation}`);
       }
 
       // Blank line after each task for readability
