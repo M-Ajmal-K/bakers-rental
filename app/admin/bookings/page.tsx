@@ -1,4 +1,3 @@
-// app/admin/bookings/page.tsx
 "use client";
 
 import { useEffect, useState, memo } from "react";
@@ -28,6 +27,7 @@ import {
   IdCard,
   LayoutGrid,
   List as ListIcon,
+  CheckCircle2,
 } from "lucide-react";
 import ConfirmBookingButton from "@/components/admin/ConfirmBookingButton";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
@@ -120,8 +120,10 @@ const MobileBookingCard = memo(function MobileBookingCard({
   onDelete,
   onConfirmed,
   onViewLicense,
+  onMarkPaidFull,
   getStatusBadge,
   calculateDays,
+  markPaidBusyId,
 }: {
   booking: Booking;
   onView: (b: Booking) => void;
@@ -129,11 +131,14 @@ const MobileBookingCard = memo(function MobileBookingCard({
   onDelete: (id: string) => void | Promise<void>;
   onConfirmed: (id: string) => void;
   onViewLicense: (b: Booking) => void;
+  onMarkPaidFull: (b: Booking) => void;
   getStatusBadge: (s: string) => JSX.Element;
   calculateDays: (a: string, b: string) => number;
+  markPaidBusyId: string | null;
 }) {
   const isPending = String(booking.status).toLowerCase() === "pending";
   const balance = calcBalance(booking);
+  const paidDisabled = booking.paymentStatus === "paid_in_full" || markPaidBusyId === booking.id;
 
   return (
     <Card className="border-0 bg-white/[0.03] backdrop-blur-md ring-1 ring-white/10 overflow-hidden">
@@ -232,6 +237,7 @@ const MobileBookingCard = memo(function MobileBookingCard({
           >
             <Edit className="h-3.5 w-3.5 mr-1" /> Edit
           </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -239,6 +245,21 @@ const MobileBookingCard = memo(function MobileBookingCard({
             className="h-8 px-3 bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
           >
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={paidDisabled}
+            onClick={() => onMarkPaidFull(booking)}
+            className={`h-8 px-3 ${
+              paidDisabled
+                ? "opacity-60 cursor-not-allowed"
+                : "bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-400/30 text-emerald-200"
+            }`}
+            title="Mark as paid in full"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Paid Full
           </Button>
 
           {isPending && <ConfirmBookingButton id={booking.id} onDone={() => onConfirmed(booking.id)} />}
@@ -258,6 +279,8 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
   onViewLicense,
   onEdit,
   onConfirmed,
+  onMarkPaidFull,
+  markPaidBusyId,
 }: {
   booking: Booking;
   onView: (b: Booking) => void;
@@ -267,9 +290,13 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
   onViewLicense: (b: Booking) => void;
   onEdit: (b: Booking) => void;
   onConfirmed: (id: string) => void;
+  onMarkPaidFull: (b: Booking) => void;
+  markPaidBusyId: string | null;
 }) {
   const isPending = String(booking.status).toLowerCase() === "pending";
   const balance = calcBalance(booking);
+  const paidDisabled = booking.paymentStatus === "paid_in_full" || markPaidBusyId === booking.id;
+
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-3 bg-white/[0.03] ring-1 ring-white/10 rounded-lg">
       <div className="min-w-0">
@@ -336,6 +363,22 @@ const MobileBookingListRow = memo(function MobileBookingListRow({
           >
             <Trash2 className="h-4 w-4" />
           </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={paidDisabled}
+            onClick={() => onMarkPaidFull(booking)}
+            className={`h-8 w-8 ${
+              paidDisabled
+                ? "opacity-60 cursor-not-allowed"
+                : "bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-400/30 text-emerald-200"
+            }`}
+            title="Paid Full"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+          </Button>
+
           {isPending && (
             <ConfirmBookingButton id={booking.id} onDone={() => onConfirmed(booking.id)} />
           )}
@@ -371,6 +414,9 @@ function BookingManagementContent() {
 
   // mobile view mode toggle ('cards' | 'list')
   const [mobileView, setMobileView] = useState<"cards" | "list">("cards");
+
+  // busy state for "Paid Full"
+  const [markPaidBusyId, setMarkPaidBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const activate = () => {
@@ -562,6 +608,43 @@ function BookingManagementContent() {
     );
   };
 
+  // Mark PAID FULL
+  const onMarkPaidFull = async (booking: Booking) => {
+    if (booking.paymentStatus === "paid_in_full") return;
+    const ok = confirm(`Mark ${booking.bookingRef} as PAID IN FULL?`);
+    if (!ok) return;
+
+    try {
+      setMarkPaidBusyId(booking.id);
+      const res = await fetch("/api/admin/bookings/mark-paid-full", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: booking.id }),
+      });
+
+      // Optimistic UI: if the API fails, we'll still update UI but alert error.
+      if (!res.ok) {
+        const msg = await res.text();
+        console.warn("[mark-paid-full] non-200:", msg);
+        alert(msg || "Failed to mark as paid in full (UI will still update).");
+      }
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === booking.id
+            ? { ...b, paymentStatus: "paid_in_full", amountPaid: b.totalAmount }
+            : b,
+        ),
+      );
+    } catch (e: any) {
+      console.error("[mark-paid-full] error:", e);
+      alert(e?.message || "Failed to mark as paid in full.");
+    } finally {
+      setMarkPaidBusyId(null);
+    }
+  };
+
   // license viewer
   const handleViewLicense = async (booking: Booking) => {
     if (!booking.licensePath) {
@@ -739,6 +822,8 @@ function BookingManagementContent() {
                     onDelete={handleDeleteBooking}
                     onConfirmed={markConfirmed}
                     onViewLicense={handleViewLicense}
+                    onMarkPaidFull={onMarkPaidFull}
+                    markPaidBusyId={markPaidBusyId}
                     getStatusBadge={getStatusBadge}
                     calculateDays={calculateDays}
                   />
@@ -757,6 +842,8 @@ function BookingManagementContent() {
                     onViewLicense={handleViewLicense}
                     onEdit={handleEditBooking}
                     onConfirmed={markConfirmed}
+                    onMarkPaidFull={onMarkPaidFull}
+                    markPaidBusyId={markPaidBusyId}
                   />
                 ))}
               </div>
@@ -800,6 +887,7 @@ function BookingManagementContent() {
                       {filteredBookings.map((booking) => {
                         const isPending = String(booking.status).toLowerCase() === "pending";
                         const balance = calcBalance(booking);
+                        const paidDisabled = booking.paymentStatus === "paid_in_full" || markPaidBusyId === booking.id;
                         return (
                           <TableRow key={booking.id} className="border-white/10 hover:bg-white/5">
                             <TableCell>
@@ -896,6 +984,22 @@ function BookingManagementContent() {
                                   className="bg-red-500/10 hover:bg-red-500/15 border-red-400/30 text-red-200"
                                 >
                                   <Trash2 className="h-4 w-4" />
+                                </Button>
+
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={paidDisabled}
+                                  onClick={() => onMarkPaidFull(booking)}
+                                  className={`${
+                                    paidDisabled
+                                      ? "opacity-60 cursor-not-allowed"
+                                      : "bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-400/30 text-emerald-200"
+                                  }`}
+                                  title="Mark as paid in full"
+                                >
+                                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                                  Paid Full
                                 </Button>
 
                                 {isPending && (

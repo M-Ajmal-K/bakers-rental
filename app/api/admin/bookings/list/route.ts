@@ -21,10 +21,23 @@ function adminClient() {
 export async function GET() {
   const supabase = adminClient()
 
-  // 1) Fetch bookings
+  // 1) Fetch bookings (explicit columns so payment fields are guaranteed)
   const { data: bookings, error: e1 } = await supabase
     .from("bookings")
-    .select("*")
+    .select(`
+      id, code, status, created_at,
+      vehicle_id,
+      customer_name, contact_number, email,
+      pickup_location, dropoff_location,
+      start_date, end_date,
+      pickup_time, dropoff_time,
+      total_price,
+      license_url,
+      flight_number,
+      payment_status,
+      amount_paid,
+      deposit_amount
+    `)
     .order("created_at", { ascending: false })
 
   if (e1) {
@@ -46,10 +59,13 @@ export async function GET() {
       return new NextResponse(e2.message ?? "Failed to load vehicles", { status: 400 })
     }
 
-    vehicleMap = (vehicles || []).reduce((acc: Record<string, { title: string; registration_number: string | null }>, v: any) => {
-      acc[v.id] = { title: v.title || "(Untitled Vehicle)", registration_number: v.registration_number ?? null }
-      return acc
-    }, {})
+    vehicleMap = (vehicles || []).reduce(
+      (acc: Record<string, { title: string; registration_number: string | null }>, v: any) => {
+        acc[v.id] = { title: v.title || "(Untitled Vehicle)", registration_number: v.registration_number ?? null }
+        return acc
+      },
+      {}
+    )
   }
 
   // 3) Return combined payload
