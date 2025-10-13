@@ -91,56 +91,95 @@ async function loadBookingByCode(code: string) {
   return { booking, vehicle };
 }
 
-/** Update booking status with idempotency */
-async function setBookingStatus(
+/** Apply owner action with idempotency + payment fields */
+async function applyOwnerAction(
   bookingId: string,
-  nextStatus: "confirmed" | "declined" | "pay_later"
-) {
+  action: "confirm" | "decline" | "paylater"
+): Promise<{ changed: boolean; after?: any }> {
+  // Pull all fields we might update / reference for messages
   const { data: current, error: getErr } = await supabaseAdmin
     .from("bookings")
-    .select("id, status")
+    .select(
+      "id, code, status, contact_number, start_date, end_date, pickup_time, dropoff_time, payment_status, amount_paid, deposit_amount"
+    )
     .eq("id", bookingId)
     .maybeSingle();
+
   if (getErr) throw getErr;
   if (!current) throw new Error("Booking not found");
 
-  if (current.status === nextStatus) return { changed: false };
-  // Allow moving from pending→(confirmed|declined|pay_later). If it was already something else, still set.
-  const { error: updErr } = await supabaseAdmin
+  const curStatus = String(current.status || "").toLowerCase();
+  const curPay = String(current.payment_status || "unpaid") as
+    | "unpaid"
+    | "deposit_paid"
+    | "pay_later"
+    | "paid_in_full";
+  const curPaid = Number(current.amount_paid ?? 0);
+  const deposit = Number(current.deposit_amount ?? 200);
+
+  // Desired fields per action
+  let next: Partial<typeof current> = {};
+  if (action === "confirm") {
+    next.status = "confirmed";
+    next.payment_status = "deposit_paid";
+    next.amount_paid = Math.max(curPaid, deposit);
+  } else if (action === "paylater") {
+    next.status = "confirmed";
+    next.payment_status = "pay_later";
+    // leave amount_paid as-is
+  } else {
+    // decline -> use 'cancelled' to match your UI/status filters
+    next.status = "cancelled";
+    // optional: next.payment_status = "unpaid";
+  }
+
+  const willChange =
+    (next.status && next.status !== curStatus) ||
+    (typeof next.payment_status !== "undefined" && next.payment_status !== curPay) ||
+    (typeof next.amount_paid !== "undefined" && next.amount_paid !== curPaid);
+
+  if (!willChange) return { changed: false, after: current };
+
+  const { data: updated, error: updErr } = await supabaseAdmin
     .from("bookings")
-    .update({ status: nextStatus })
-    .eq("id", bookingId);
+    .update(next)
+    .eq("id", bookingId)
+    .select(
+      "id, code, status, contact_number, start_date, end_date, pickup_time, dropoff_time, payment_status, amount_paid, deposit_amount"
+    )
+    .maybeSingle();
+
   if (updErr) throw updErr;
-  return { changed: true };
+  return { changed: true, after: updated || current };
 }
 
-/** Send customer confirmation / decline / pay-later message */
-async function notifyCustomer(
-  booking: any,
-  nextStatus: "confirmed" | "declined" | "pay_later"
-) {
-  const to = digits(booking.contact_number || "");
+/** Send customer message based on final state */
+async function notifyCustomerForAction(after: any, action: "confirm" | "decline" | "paylater") {
+  const to = digits(after?.contact_number || "");
   if (!to) return;
 
-  if (nextStatus === "confirmed") {
+  if (action === "confirm") {
+    const paid = Number(after?.amount_paid ?? 0);
+    const dep = Number(after?.deposit_amount ?? 200);
     const msg = [
-      `✅ Booking ${booking.code} confirmed!`,
-      `Pickup: ${booking.start_date || "?"} • ${booking.pickup_time || "--:--"}`,
-      `Drop-off: ${booking.end_date || "?"} • ${booking.dropoff_time || "--:--"}`,
-      `We look forward to seeing you. Reply here if you need anything.`,
+      `✅ Booking ${after.code} confirmed (deposit recorded).`,
+      `Paid: $${paid.toFixed(2)} FJD (Deposit: $${dep.toFixed(2)})`,
+      `Pickup: ${after.start_date || "?"} • ${after.pickup_time || "--:--"}`,
+      `Drop-off: ${after.end_date || "?"} • ${after.dropoff_time || "--:--"}`,
+      `Reply here if you need anything.`,
     ].join("\n");
     await sendText(to, msg);
-  } else if (nextStatus === "pay_later") {
+  } else if (action === "paylater") {
     const msg = [
-      `📝 Booking ${booking.code} approved as *Pay Later*.`,
-      `You may settle the balance before or at pickup.`,
-      `Pickup: ${booking.start_date || "?"} • ${booking.pickup_time || "--:--"}`,
+      `📝 Booking ${after.code} approved as *Pay Later*.`,
+      `You can pay the balance before or at pickup.`,
+      `Pickup: ${after.start_date || "?"} • ${after.pickup_time || "--:--"}`,
       `If you prefer to pay a deposit now, reply with your receipt and we'll mark it confirmed.`,
     ].join("\n");
     await sendText(to, msg);
   } else {
     const msg = [
-      `❌ Booking ${booking.code} was declined.`,
+      `❌ Booking ${after.code} was cancelled.`,
       `If you believe this is a mistake or want to try a different option, please reply here.`,
     ].join("\n");
     await sendText(to, msg);
@@ -216,41 +255,25 @@ export async function POST(req: Request) {
             const action = m[1] as "confirm" | "decline" | "paylater";
             const bookingId = m[2];
 
-            const { data: booking, error } = await supabaseAdmin
-              .from("bookings")
-              .select(
-                "id, code, status, contact_number, start_date, end_date, pickup_time, dropoff_time"
-              )
-              .eq("id", bookingId)
-              .maybeSingle();
-
-            if (error || !booking) {
-              await sendText(OWNER_PHONE, `⚠️ Booking not found for id: ${bookingId}`);
-              continue;
-            }
-
-            const nextStatus =
-              action === "confirm" ? "confirmed" :
-              action === "decline" ? "declined" : "pay_later";
-
             try {
-              const { changed } = await setBookingStatus(booking.id, nextStatus);
+              const { changed, after } = await applyOwnerAction(bookingId, action);
+
               if (changed) {
                 await sendText(
                   OWNER_PHONE,
-                  `✓ ${booking.code} ${nextStatus.replace("_", " ")}. Customer will be notified.`
+                  `✓ ${after.code} ${action === "confirm" ? "confirmed (deposit paid)" : action === "paylater" ? "set to Pay Later" : "cancelled"}. Customer will be notified.`
                 );
-                await notifyCustomer(booking, nextStatus);
+                await notifyCustomerForAction(after, action);
               } else {
                 await sendText(
                   OWNER_PHONE,
-                  `ℹ️ ${booking.code} was already ${nextStatus}. No change made.`
+                  `ℹ️ No change for ${after?.code || bookingId}. It was already in that state.`
                 );
               }
             } catch (e: any) {
               await sendText(
                 OWNER_PHONE,
-                `❌ Failed to update ${booking.code}: ${e?.message || e}`
+                `❌ Failed to update booking ${bookingId}: ${e?.message || e}`
               );
             }
 
@@ -304,8 +327,8 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // Basic guard: ensure it's pending (or relax if you want)
-          if (booking.status && booking.status !== "pending") {
+          // Basic guard: only escalate if still pending
+          if (booking.status && String(booking.status).toLowerCase() !== "pending") {
             await sendText(
               OWNER_PHONE,
               `ℹ️ ${booking.code} is already ${booking.status}.`
