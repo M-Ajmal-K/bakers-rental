@@ -564,7 +564,14 @@ function DashboardContent() {
                         <TrendingUp className="h-4 w-4 text-emerald-400" />
                       </div>
                       <p className="text-cyan-100/70 text-[10px] font-medium leading-tight">{stat.title}</p>
-                      <p className="text-xl font-extrabold text-white leading-tight">{stat.value}</p>
+                      {/* FIX: keep long revenue inside card on small screens */}
+                      <p
+                        className={`font-extrabold text-white leading-tight ${
+                          stat.title.includes("Revenue") ? "text-lg sm:text-xl break-all" : "text-xl"
+                        }`}
+                      >
+                        {stat.value}
+                      </p>
                     </CardContent>
                   </Card>
                 ))}
