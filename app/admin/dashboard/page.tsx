@@ -18,6 +18,7 @@ import {
   User,
   Clock,
   Plane,
+  Coins, // used in the Currencies card
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { AdminAuthGuard } from "@/components/admin-auth-guard";
@@ -85,7 +86,10 @@ type ViewKey = "today" | "tomorrow" | "dayAfter";
 
 /* ---------------- Payment helpers ---------------- */
 const money = (n: number) =>
-  `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `$${(Number.isFinite(n) ? n : 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 const calcBalance = (opts: {
   totalPrice: number;
@@ -128,6 +132,9 @@ function DashboardContent() {
   const [autoEnabled, setAutoEnabled] = useState<boolean>(true);
   const router = useRouter();
 
+  /* Mobile tabs (Overview · Tasks · Manage) */
+  const [mobileTab, setMobileTab] = useState<"overview" | "tasks" | "manage">("tasks");
+
   const fmtFJD = new Intl.NumberFormat("en-FJ", {
     style: "currency",
     currency: "FJD",
@@ -156,47 +163,29 @@ function DashboardContent() {
     }
   };
 
-  /* ------------------------------- Live metrics ---------------------------- */
+  /* ------------------------------- Metrics ---------------------------------
+     Vehicles: via Supabase client.
+     Bookings & Revenue: via /api/admin/bookings/list (service role).
+  -------------------------------------------------------------------------- */
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    const loadVehicles = async () => {
       try {
         const { count: vehicleCount, error: vErr } = await supabase
           .from("vehicles")
           .select("*", { count: "exact", head: true });
         if (vErr) throw vErr;
 
-        const { count: bookingCount, error: bErr } = await supabase
-          .from("bookings")
-          .select("*", { count: "exact", head: true })
-          .in("status", ["confirmed", "Confirmed"]);
-        if (bErr) throw bErr;
-
-        const { data: revRows, error: rErr } = await supabase
-          .from("bookings")
-          .select("total_price")
-          .in("status", ["confirmed", "Confirmed"]);
-        if (rErr) throw rErr;
-
-        const revenue = (revRows || []).reduce((sum, r: any) => {
-          const v = Number(r?.total_price ?? 0);
-          return sum + (Number.isFinite(v) ? v : 0);
-        }, 0);
-
         if (!cancelled) {
-          setMetrics({
-            vehicles: vehicleCount || 0,
-            bookings: bookingCount || 0,
-            revenue,
-          });
+          setMetrics((m) => ({ ...m, vehicles: vehicleCount || 0 }));
         }
       } catch (err) {
-        console.error("[AdminDashboard] metrics error:", err);
+        console.error("[AdminDashboard] vehicles count error:", err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-    load();
+    loadVehicles();
     return () => {
       cancelled = true;
     };
@@ -247,9 +236,23 @@ function DashboardContent() {
 
   const activeYMD = useMemo(() => viewToYMD(view), [view]);
 
-  /* ----------------------- Load bookings once -------------------- */
+  /* ------------- Load bookings (also powers metrics now) ------------------ */
   useEffect(() => {
     let cancelled = false;
+
+    // how much we've actually received for a booking
+    const paidAmountFor = (r: any) => {
+      const ps = String(r?.payment_status || "").toLowerCase();
+      const ap = Number(r?.amount_paid ?? 0);
+      const dep = Number(r?.deposit_amount ?? 0);
+      const total = Number(r?.total_price ?? 0);
+      if (Number.isFinite(ap) && ap > 0) return ap;
+      if (ps === "paid_in_full")
+        return Number.isFinite(total) && total > 0 ? total : Number.isFinite(dep) ? dep : 0;
+      if (ps === "deposit_paid") return Number.isFinite(dep) ? dep : 0;
+      return 0;
+    };
+
     const load = async () => {
       setTasksLoading(true);
       try {
@@ -266,7 +269,21 @@ function DashboardContent() {
         const json = await res.json().catch(() => null);
         const items: BookingRow[] = Array.isArray(json?.items) ? json.items : [];
 
-        // Only confirmed/completed
+        // ---- METRICS (from service-role data) ----
+        const confirmedCount = items.filter(
+          (r) => String(r.status || "").toLowerCase() === "confirmed",
+        ).length;
+
+        const revenue = items.reduce((sum, r) => {
+          const statusRaw = String(r?.status || "").toLowerCase();
+          if (statusRaw === "declined" || statusRaw === "cancelled" || statusRaw === "canceled")
+            return sum;
+          return sum + paidAmountFor(r);
+        }, 0);
+
+        setMetrics((m) => ({ ...m, bookings: confirmedCount, revenue }));
+
+        // ---- TASKS (confirmed/completed only) ----
         const normalized = items.filter((r) => {
           const s = String(r.status || "").toLowerCase();
           return s === "confirmed" || s === "completed";
@@ -281,6 +298,7 @@ function DashboardContent() {
       }
     };
     load();
+
     return () => {
       cancelled = true;
     };
@@ -338,7 +356,7 @@ function DashboardContent() {
       const balance = calcBalance({ totalPrice, paymentStatus, amountPaid, depositAmount });
 
       return { paymentStatus, amountPaid, depositAmount, totalPrice, balance };
-      };
+    };
 
     // Deliver rows for START bookings
     for (const startB of rowsStart) {
@@ -425,11 +443,6 @@ function DashboardContent() {
     return () => clearInterval(id);
   }, [autoEnabled]);
 
-  const selectView = (v: ViewKey) => {
-    setView(v);
-    setAutoEnabled(false);
-  };
-
   const fmtBuffer = (mins?: number) => {
     if (mins == null) return "—";
     const sign = mins >= 0 ? "" : "-";
@@ -458,12 +471,12 @@ function DashboardContent() {
   const statCards = [
     { title: "Total Vehicles", value: loading ? "—" : String(metrics.vehicles), icon: Car, hint: "From vehicles table" },
     { title: "Active Bookings", value: loading ? "—" : String(metrics.bookings), icon: Calendar, hint: "Confirmed only" },
-    { title: "Revenue (All Time)", value: loading ? "—" : fmtFJD.format(metrics.revenue), icon: BarChart3, hint: "From confirmed bookings" },
+    { title: "Revenue (All Time)", value: loading ? "—" : fmtFJD.format(metrics.revenue), icon: BarChart3, hint: "Sum of paid amounts" },
   ];
 
   /* --------------------------------- Render -------------------------------- */
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden pb-20 md:pb-0">
       {/* Background accents */}
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
@@ -507,7 +520,326 @@ function DashboardContent() {
         </div>
       </nav>
 
-      <section className="py-12 px-4">
+      {/* Mobile segmented control */}
+      <div className="md:hidden sticky top:[64px] top-[64px] z-40 bg-slate-950/70 backdrop-blur border-b border-white/10">
+        <div className="container mx-auto max-w-7xl px-4 py-2">
+          <div className="grid grid-cols-3 gap-2">
+            {(["overview", "tasks", "manage"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setMobileTab(t)}
+                className={`text-sm rounded-full px-3 py-2 transition ${
+                  mobileTab === t
+                    ? "bg-white/15 text-white ring-1 ring-white/30"
+                    : "bg-white/5 text-white/70 hover:bg-white/10"
+                }`}
+              >
+                {t === "overview" ? "Overview" : t === "tasks" ? "Tasks" : "Manage"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* MOBILE LAYOUT */}
+      <section className="md:hidden py-6 px-4">
+        <div className="container mx-auto max-w-7xl">
+          {/* Overview tab */}
+          {mobileTab === "overview" && (
+            <div className="space-y-6">
+              {/* KPI grid — compact, no horizontal scroll */}
+              <div className="grid grid-cols-3 gap-2">
+                {statCards.map((stat, index) => (
+                  <Card
+                    key={stat.title}
+                    className="border-0 bg-white/[0.06] backdrop-blur-xl ring-1 ring-white/10 shadow-md"
+                  >
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div
+                          className={`w-8 h-8 ${iconGradients[index % 3]} rounded-lg flex items-center justify-center shadow`}
+                        >
+                          <stat.icon className="h-4 w-4 text-white" />
+                        </div>
+                        <TrendingUp className="h-4 w-4 text-emerald-400" />
+                      </div>
+                      <p className="text-cyan-100/70 text-[10px] font-medium leading-tight">{stat.title}</p>
+                      <p className="text-xl font-extrabold text-white leading-tight">{stat.value}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Next up (first two tasks) */}
+              <div className="space-y-2">
+                <h3 className="text-white/80 text-sm font-semibold">Next up</h3>
+                {activeTasks.slice(0, 2).map((t) => (
+                  <div key={t.bookingId} className="rounded-lg bg-white/5 ring-1 ring-white/10 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs uppercase tracking-wide text-white/60">{t.type}</span>
+                      <span className="text-white font-semibold flex items-center gap-1">
+                        <Clock className="h-4 w-4" />
+                        {t.time}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-white">{t.vehicleTitle}</div>
+                    <div className="text-xs text-white/70">{t.customerName}</div>
+                  </div>
+                ))}
+                {activeTasks.length === 0 && (
+                  <div className="text-white/60 text-sm">No upcoming tasks for this day.</div>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => setMobileTab("tasks")}
+                  className="mt-2 bg-white/10 hover:bg-white/15 text-white border border-white/20"
+                >
+                  View all tasks
+                </Button>
+              </div>
+
+              {/* Quick actions (tiles) */}
+              <div className="grid grid-cols-2 gap-3">
+                <Link
+                  href="/admin/vehicles"
+                  className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 flex items-center gap-3 text-white hover:bg-white/10"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500 to-sky-500 flex items-center justify-center">
+                    <Car className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-sm font-medium">Fleet</span>
+                </Link>
+                <Link
+                  href="/admin/bookings"
+                  className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 flex items-center gap-3 text-white hover:bg-white/10"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
+                    <Calendar className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-sm font-medium">Bookings</span>
+                </Link>
+                <Link
+                  href="/admin/categories"
+                  className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 flex items-center gap-3 text-white hover:bg-white/10"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                    <Settings className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-sm font-medium">Settings</span>
+                </Link>
+                <Link
+                  href="/admin/currencies"
+                  className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 flex items-center gap-3 text-white hover:bg-white/10"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
+                    <Coins className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-sm font-medium">Currencies</span>
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {/* Tasks tab */}
+          {mobileTab === "tasks" && (
+            <div className="space-y-3">
+              {/* Sticky date chips */}
+              <div className="sticky top-[112px] z-30 bg-gradient-to-r from-slate-950/70 via-slate-900/40 to-slate-950/70 backdrop-blur px-1 py-2 -mx-4">
+                <div className="flex gap-2">
+                  {(["today", "tomorrow", "dayAfter"] as ViewKey[]).map((v) => (
+                    <Button
+                      key={v}
+                      size="sm"
+                      variant={view === v ? "default" : "outline"}
+                      className={
+                        view === v
+                          ? "bg-cyan-600 text-white"
+                          : "bg-transparent hover:bg-white/10 text-white border border-white/30"
+                      }
+                      onClick={() => {
+                        setView(v);
+                        setAutoEnabled(false);
+                      }}
+                    >
+                      {v === "today" ? "Today" : v === "tomorrow" ? "Tomorrow" : "Day After"}
+                    </Button>
+                  ))}
+                </div>
+                {activeDateLabel && (
+                  <div className="text-xs text-white/60 pt-1 pl-1">{activeDateLabel}</div>
+                )}
+              </div>
+
+              {/* Task cards (existing mobile list) */}
+              {tasksLoading ? (
+                <p className="text-white/70 text-sm">Loading…</p>
+              ) : activeTasks.length === 0 ? (
+                <p className="text-white/60 text-sm">No tasks scheduled for this day.</p>
+              ) : (
+                activeTasks.map((t) => (
+                  <div key={t.bookingId} className="rounded-lg bg-white/5 ring-1 ring-white/10 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs uppercase tracking-wide text-white/60">{t.type}</span>
+                      <span className="text-white font-semibold flex items-center gap-1">
+                        <Clock className="h-4 w-4" />
+                        {t.time}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 text-white font-medium">{t.vehicleTitle}</div>
+                    {t.plate && <div className="text-white/60 text-xs">{t.plate}</div>}
+
+                    <div className="mt-2 text-white/90 flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      <span>{t.customerName}</span>
+                    </div>
+                    {t.customerPhone && (
+                      <a href={`tel:${t.customerPhone}`} className="text-cyan-300 text-xs underline">
+                        {t.customerPhone}
+                      </a>
+                    )}
+                    {t.customerEmail && <div className="text-white/60 text-xs">{t.customerEmail}</div>}
+                    {t.flightNumber && (
+                      <div className="text-white/70 text-xs mt-1 flex items-center gap-1.5">
+                        <Plane className="h-3.5 w-3.5" />
+                        Flight: {t.flightNumber}
+                      </div>
+                    )}
+
+                    {/* Payment summary */}
+                    <div className="mt-2 text-xs">
+                      <span className={`inline-block px-2 py-0.5 rounded ${paymentColors[t.paymentStatus]} mr-2`}>
+                        {paymentLabel[t.paymentStatus]}
+                      </span>
+                      <span className="text-white/80">
+                        Paid: {money(t.amountPaid)} · Balance:{" "}
+                        <span className={t.balance > 0 ? "text-amber-200" : "text-emerald-200"}>
+                          {money(t.balance)}
+                        </span>
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-2">
+                      <div className="text-white/80 text-sm flex items-start gap-2">
+                        <MapPin className="h-4 w-4 mt-0.5" />
+                        <div>
+                          <div className="text-white/60 text-xs">Pick vehicle from</div>
+                          <div className="whitespace-pre-wrap">{t.fromLocation}</div>
+                        </div>
+                      </div>
+                      <div className="text-white/80 text-sm flex items-start gap-2">
+                        <MapPin className="h-4 w-4 mt-0.5" />
+                        <div>
+                          <div className="text-white/60 text-xs">Drop vehicle to</div>
+                          <div className="whitespace-pre-wrap">{t.toLocation}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 text-xs text-white/70">
+                      Booking: <span className="font-mono">{t.bookingCode}</span>
+                      {t.type === "Deliver" && (
+                        <>
+                          {" "}
+                          · Buffer:{" "}
+                          <span className={`${bufferClass(t.bufferMinutes)}`}>{fmtBuffer(t.bufferMinutes)}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Manage tab */}
+          {mobileTab === "manage" && (
+            <div className="grid grid-cols-2 gap-4">
+              <Link
+                href="/admin/vehicles"
+                className="rounded-xl bg-white/5 ring-1 ring-white/10 p-5 flex items-center gap-3 text-white hover:bg-white/10"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500 to-sky-500 flex items-center justify-center">
+                  <Car className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Vehicle Management</div>
+                  <div className="text-xs text-white/60">Manage fleet</div>
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/bookings"
+                className="rounded-xl bg-white/5 ring-1 ring-white/10 p-5 flex items-center gap-3 text-white hover:bg-white/10"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
+                  <Calendar className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Booking Management</div>
+                  <div className="text-xs text-white/60">View & update</div>
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/categories"
+                className="rounded-xl bg-white/5 ring-1 ring-white/10 p-5 flex items-center gap-3 text-white hover:bg-white/10"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                  <Settings className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">System Settings</div>
+                  <div className="text-xs text-white/60">Categories & more</div>
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/currencies"
+                className="rounded-xl bg-white/5 ring-1 ring-white/10 p-5 flex items-center gap-3 text-white hover:bg-white/10"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
+                  <Coins className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Currencies & Rates</div>
+                  <div className="text-xs text-white/60">FJD · USD · AUD</div>
+                </div>
+              </Link>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Bottom mobile nav */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-slate-900/80 backdrop-blur border-t border-white/10">
+        <div className="grid grid-cols-3">
+          <button
+            onClick={() => setMobileTab("overview")}
+            className={`py-2 text-center text-xs ${mobileTab === "overview" ? "text-white" : "text-white/60"}`}
+          >
+            <BarChart3 className="h-5 w-5 mx-auto mb-0.5" />
+            Overview
+          </button>
+          <button
+            onClick={() => setMobileTab("tasks")}
+            className={`py-2 text-center text-xs ${mobileTab === "tasks" ? "text-white" : "text-white/60"}`}
+          >
+            <Calendar className="h-5 w-5 mx-auto mb-0.5" />
+            Tasks
+          </button>
+          <button
+            onClick={() => setMobileTab("manage")}
+            className={`py-2 text-center text-xs ${mobileTab === "manage" ? "text-white" : "text-white/60"}`}
+          >
+            <Settings className="h-5 w-5 mx-auto mb-0.5" />
+            Manage
+          </button>
+        </div>
+      </div>
+
+      {/* DESKTOP LAYOUT (kept intact) */}
+      <section className="hidden md:block py-12 px-4">
         <div className="container mx-auto max-w-7xl">
           <div className="fade-in-up mb-12">
             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-3 drop-shadow">
@@ -524,7 +856,7 @@ function DashboardContent() {
                   <CardContent className="p-6">
                     <div className="flex items-center justify-between mb-5">
                       <div
-                        className={`w-14 h-14 ${["bg-gradient-to-br from-cyan-500 to-sky-500","bg-gradient-to-br from-violet-500 to-fuchsia-500","bg-gradient-to-br from-emerald-500 to-teal-500"][index % 3]} rounded-xl flex items-center justify-center shadow-lg shadow-black/20`}
+                        className={`w-14 h-14 ${iconGradients[index % 3]} rounded-xl flex items-center justify-center shadow-lg shadow-black/20`}
                       >
                         <stat.icon className="h-7 w-7 text-white" />
                       </div>
@@ -609,6 +941,28 @@ function DashboardContent() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Currencies & Rates card */}
+            <div className="fade-in-up" style={{ animationDelay: "0.8s" }}>
+              <Card className="h-full border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center gap-3 text-white text-xl">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-black/20">
+                      <Coins className="h-6 w-6 text-white" />
+                    </div>
+                    Currencies & Rates
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col">
+                  <p className="text-cyan-100/80 mb-6 flex-1">
+                    Add or update AUD/USD rates against FJD. These appear on the customer booking page.
+                  </p>
+                  <Button asChild className="btn-3d bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold shadow-lg shadow-amber-500/20">
+                    <Link href="/admin/currencies">Manage Currencies</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
           </div>
 
           {/* Tasks — unified table with view toggle */}
@@ -632,7 +986,10 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => setView("today")}
+                      onClick={() => {
+                        setView("today");
+                        setAutoEnabled(false);
+                      }}
                     >
                       Today
                     </Button>
@@ -644,7 +1001,10 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => setView("tomorrow")}
+                      onClick={() => {
+                        setView("tomorrow");
+                        setAutoEnabled(false);
+                      }}
                     >
                       Tomorrow
                     </Button>
@@ -656,7 +1016,10 @@ function DashboardContent() {
                           ? "bg-cyan-600 text-white"
                           : "bg-transparent hover:bg-white/10 text-white border border-white/30"
                       }
-                      onClick={() => setView("dayAfter")}
+                      onClick={() => {
+                        setView("dayAfter");
+                        setAutoEnabled(false);
+                      }}
                     >
                       Day After
                     </Button>
@@ -673,88 +1036,8 @@ function DashboardContent() {
               </CardHeader>
 
               <CardContent>
-                {/* Mobile cards */}
-                <div className="md:hidden space-y-3">
-                  {tasksLoading ? (
-                    <p className="text-white/70 text-sm">Loading…</p>
-                  ) : activeTasks.length === 0 ? (
-                    <p className="text-white/60 text-sm">No tasks scheduled for this day.</p>
-                  ) : (
-                    activeTasks.map((t) => (
-                      <div key={t.bookingId} className="rounded-lg bg-white/5 ring-1 ring-white/10 p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs uppercase tracking-wide text-white/60">{t.type}</span>
-                          <span className="text-white font-semibold flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            {t.time}
-                          </span>
-                        </div>
-
-                        <div className="mt-2 text-white font-medium">{t.vehicleTitle}</div>
-                        {t.plate && <div className="text-white/60 text-xs">{t.plate}</div>}
-
-                        <div className="mt-2 text-white/90 flex items-center gap-2">
-                          <User className="h-4 w-4" />
-                          <span>{t.customerName}</span>
-                        </div>
-                        {t.customerPhone && (
-                          <a href={`tel:${t.customerPhone}`} className="text-cyan-300 text-xs underline">
-                            {t.customerPhone}
-                          </a>
-                        )}
-                        {t.customerEmail && <div className="text-white/60 text-xs">{t.customerEmail}</div>}
-                        {t.flightNumber && (
-                          <div className="text-white/70 text-xs mt-1 flex items-center gap-1.5">
-                            <Plane className="h-3.5 w-3.5" />
-                            Flight: {t.flightNumber}
-                          </div>
-                        )}
-
-                        {/* Payment summary */}
-                        <div className="mt-2 text-xs">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded ${paymentColors[t.paymentStatus]} mr-2`}
-                          >
-                            {paymentLabel[t.paymentStatus]}
-                          </span>
-                          <span className="text-white/80">
-                            Paid: {money(t.amountPaid)} · Balance:{" "}
-                            <span className={t.balance > 0 ? "text-amber-200" : "text-emerald-200"}>
-                              {money(t.balance)}
-                            </span>
-                          </span>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-1 gap-2">
-                          <div className="text-white/80 text-sm flex items-start gap-2">
-                            <MapPin className="h-4 w-4 mt-0.5" />
-                            <div>
-                              <div className="text-white/60 text-xs">Pick vehicle from</div>
-                              <div className="whitespace-pre-wrap">{t.fromLocation}</div>
-                            </div>
-                          </div>
-                          <div className="text-white/80 text-sm flex items-start gap-2">
-                            <MapPin className="h-4 w-4 mt-0.5" />
-                            <div>
-                              <div className="text-white/60 text-xs">Drop vehicle to</div>
-                              <div className="whitespace-pre-wrap">{t.toLocation}</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 text-xs text-white/70">
-                          Booking: <span className="font-mono">{t.bookingCode}</span>
-                          {t.type === "Deliver" && (
-                            <> · Buffer: <span className={`${bufferClass(t.bufferMinutes)}`}>{fmtBuffer(t.bufferMinutes)}</span></>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
                 {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="overflow-x-auto">
                   {tasksLoading ? (
                     <p className="text-white/70 text-sm px-2">Loading…</p>
                   ) : activeTasks.length === 0 ? (
