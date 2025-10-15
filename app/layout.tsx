@@ -1,15 +1,15 @@
-import type { Metadata, Viewport } from "next"
-import Script from "next/script"
-import { GeistSans } from "geist/font/sans"
-import { GeistMono } from "geist/font/mono"
-import { Analytics } from "@vercel/analytics/react"
-import "./globals.css"
+import type { Metadata, Viewport } from "next";
+import Script from "next/script";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
+import { Analytics } from "@vercel/analytics/react";
+import "./globals.css";
 
-const SITE_NAME = "Bakers Rentals"
+const SITE_NAME = "Bakers Rentals";
 const SITE_DESCRIPTION =
-  "Premium car rentals in Fiji. Reserve SUVs, vans, and compact cars with transparent pricing and easy WhatsApp support."
+  "Premium car rentals in Fiji. Reserve SUVs, vans, and compact cars with transparent pricing and easy WhatsApp support.";
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") || "http://localhost:3000"
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "") || "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -63,7 +63,7 @@ export const metadata: Metadata = {
     },
   },
   // Note: per-page canonicals should be set in each page's metadata.
-}
+};
 
 export const viewport: Viewport = {
   themeColor: [
@@ -71,12 +71,12 @@ export const viewport: Viewport = {
     { media: "(prefers-color-scheme: dark)", color: "#0b0b0b" },
   ],
   colorScheme: "light dark",
-}
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode
+  children: React.ReactNode;
 }>) {
   const orgJsonLd = {
     "@context": "https://schema.org",
@@ -84,7 +84,7 @@ export default function RootLayout({
     name: SITE_NAME,
     url: SITE_URL,
     logo: `${SITE_URL}/apple-touch-icon.png`,
-  }
+  };
 
   const websiteJsonLd = {
     "@context": "https://schema.org",
@@ -96,11 +96,27 @@ export default function RootLayout({
       target: `${SITE_URL}/search?q={query}`,
       "query-input": "required name=query",
     },
-  }
+  };
 
   return (
     <html lang="en">
       <head>
+        {/* Strip extension-injected attributes before React hydrates to avoid hydration mismatches */}
+        <Script id="strip-fdprocessed" strategy="beforeInteractive">
+          {`(function(){
+             var clean = function(){
+               try {
+                 document.querySelectorAll('[fdprocessedid]').forEach(function(el){
+                   el.removeAttribute('fdprocessedid');
+                 });
+               } catch(e){}
+             };
+             clean();
+             // run once more when DOM is ready in case an extension races
+             document.addEventListener('readystatechange', clean, { once: true });
+           })();`}
+        </Script>
+
         <style>{`
 html {
   font-family: ${GeistSans.style.fontFamily};
@@ -121,10 +137,11 @@ html {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
         />
       </head>
-      <body>
+      {/* Ignore any remaining harmless attribute diffs at the body root */}
+      <body suppressHydrationWarning>
         {children}
         <Analytics />
       </body>
     </html>
-  )
+  );
 }

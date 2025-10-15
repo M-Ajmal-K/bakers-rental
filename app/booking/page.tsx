@@ -43,11 +43,14 @@ import {
 } from "@/components/ui/dialog";
 import JsonLd from "@/components/seo/JsonLd";
 
+/* NEW: currencies hook */
+import { useCurrencies, formatMoneyFjd } from "@/hooks/useCurrencies";
+
 /* -------------------------------- Helpers -------------------------------- */
 
 type ServiceLocation = { name: string; fee_fjd: number };
-
 type BookedRange = { start: Date; end: Date };
+type CurrencyCode = string;
 
 function atStartOfDay(d: Date) {
   const x = new Date(d);
@@ -101,11 +104,7 @@ function toLocalISO(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/* ---- Formatting + WhatsApp message builder (NEW) ---- */
-function formatFJD(n: number) {
-  return `${Number(n || 0).toFixed(0)} FJD`;
-}
-
+/* ---- WhatsApp message builder ---- */
 function buildWhatsAppMessage(opts: {
   bookingCode?: string | null;
   vehicleName?: string;
@@ -124,6 +123,8 @@ function buildWhatsAppMessage(opts: {
   customerEmail?: string;
   notes?: string;
   total?: number;
+  // allow caller to format amounts in the selected currency
+  formatAmount?: (n: number) => string;
 }) {
   const {
     bookingCode,
@@ -135,11 +136,14 @@ function buildWhatsAppMessage(opts: {
     customerName, customerPhone, customerEmail,
     notes,
     total,
+    formatAmount
   } = opts;
 
   const when = (pickupDate && returnDate)
     ? `${format(pickupDate, "PPP")} • ${pickupTime} → ${format(returnDate, "PPP")} • ${dropoffTime}`
     : "";
+
+  const fmt = (n?: number) => (typeof n === "number" ? (formatAmount ? formatAmount(n) : `${n.toFixed(2)} FJD`) : "");
 
   const lines = [
     "Hi Bakers Rentals, Below are my Booking Details with my Payment attached.",
@@ -150,21 +154,21 @@ function buildWhatsAppMessage(opts: {
       : undefined,
     when ? `Dates: ${when}` : undefined,
     pickupLocation != null
-      ? `Pickup: ${pickupLocation}${pickupFee ? ` (+$${pickupFee})` : " (Free)"}`
+      ? `Pickup: ${pickupLocation}${pickupFee ? ` (+${fmt(pickupFee)})` : " (Free)"}`
       : undefined,
     dropoffLocation != null
-      ? `Drop-off: ${dropoffLocation}${dropoffFee ? ` (+$${dropoffFee})` : " (Free)"}`
+      ? `Drop-off: ${dropoffLocation}${dropoffFee ? ` (+${fmt(dropoffFee)})` : " (Free)"}`
       : undefined,
     customerName ? `Customer: ${customerName}` : undefined,
     customerPhone ? `Phone: ${customerPhone}` : undefined,
     customerEmail ? `Email: ${customerEmail}` : undefined,
-    total != null ? `Total Quote: $${formatFJD(total)}` : undefined,
+    total != null ? `Total Quote: ${fmt(total)}` : undefined,
     notes ? `Notes: ${notes}` : undefined,
     "",
     "Please attach your payment before sending. Thank you!",
   ].filter(Boolean);
 
-  const text = lines.join("\n");
+  const text = (lines as string[]).join("\n");
   return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(text)}`;
 }
 
@@ -264,6 +268,50 @@ export default function BookingPage() {
   // NEW: control popover open state so calendar closes immediately on date pick
   const [pickupOpen, setPickupOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
+
+  /* ---------------- Currency state via hook (admin-configured) ---------------- */
+  const { items: currencyItems, map: currencyMap } = useCurrencies();
+  const [currency, setCurrency] = useState<CurrencyCode>("FJD");
+  const currencyList = useMemo(() => currencyItems.map((c) => c.code), [currencyItems]);
+
+  // remember user's last choice
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("booking.currency");
+      if (saved) setCurrency(saved.toUpperCase());
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      if (currency) localStorage.setItem("booking.currency", currency);
+    } catch {}
+  }, [currency]);
+
+  // one-time nudge for visibility of the mobile FAB
+  const [showCurrencyNudge, setShowCurrencyNudge] = useState(false);
+  useEffect(() => {
+    try {
+      const key = "booking.currency.nudge";
+      if (!localStorage.getItem(key)) {
+        setShowCurrencyNudge(true);
+        const t = setTimeout(() => {
+          setShowCurrencyNudge(false);
+          localStorage.setItem(key, "1");
+        }, 1600);
+        return () => clearTimeout(t);
+      }
+    } catch {}
+  }, []);
+
+  // format FJD amount in selected currency with code suffix, e.g. "123.00 USD"
+  const formatMoney = (amountFJD: number, code: CurrencyCode = currency) =>
+    formatMoneyFjd(amountFJD, code, currencyMap);
+
+  // convenience: smooth scroll to the main currency picker
+  const scrollToCurrency = () => {
+    const el = document.getElementById("currency-picker-main");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   /* ---------------- Load real vehicles from Supabase ---------------- */
   useEffect(() => {
@@ -462,7 +510,8 @@ export default function BookingPage() {
     if (days >= 8) rate = rate8;
     else if (days >= 5) rate = rate5;
 
-    return `${days} × $${rate}`;
+    // NOTE: display formatting is now done where we render using formatMoney(...)
+    return `${days} × ${rate}`;
   };
 
   /** Location fee helpers (from DB) */
@@ -475,7 +524,7 @@ export default function BookingPage() {
   const dropoffFee = useMemo(() => feeFor(dropoffLocation), [feeFor, dropoffLocation]);
   const locationFeesTotal = pickupFee + dropoffFee;
 
-  /** Grand total (vehicle + location fees) */
+  /** Grand total (vehicle + location fees) — stored in FJD internally */
   const calculateTotal = () => {
     const vehicleSubtotal = selectedVehicleData ? calculateTieredTotal(selectedVehicleData, calculateDays()) : 0;
     return vehicleSubtotal + locationFeesTotal;
@@ -626,7 +675,6 @@ export default function BookingPage() {
 
   /* ---------------- SUCCESS SCREEN ---------------- */
   if (showSuccess) {
-    // NEW: detailed WhatsApp message with all booking details (incl. reg #)
     const waHref = buildWhatsAppMessage({
       bookingCode,
       vehicleName: selectedVehicleData?.name,
@@ -645,11 +693,15 @@ export default function BookingPage() {
       customerEmail: customerInfo.email,
       notes: customerInfo.notes,
       total: calculateTotal(),
+      formatAmount: (n) => formatMoney(n),
     });
 
-    // bond math for dialog
-    const totalNow = calculateTotal(); // includes location fees
-    const sameDay = pickupDate && returnDate && atStartOfDay(pickupDate).getTime() === atStartOfDay(returnDate).getTime();
+    // totals in FJD internally; display using selected currency (bond explicitly in FJD)
+    const totalNow = calculateTotal();
+    const sameDay =
+      pickupDate &&
+      returnDate &&
+      atStartOfDay(pickupDate).getTime() === atStartOfDay(returnDate).getTime();
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -699,7 +751,7 @@ export default function BookingPage() {
                 </div>
                 <div className="text-sm sm:text-base">
                   <p className="font-semibold text-foreground">
-                    Pay only the refundable bond: <span className="font-bold">$ {BOND_FJD} FJD</span>.
+                    Pay only the refundable bond: <span className="font-bold">{formatMoney(BOND_FJD, "FJD")}</span>.
                   </p>
                   <p className="text-muted-foreground">The rental balance is paid on arrival.</p>
                 </div>
@@ -739,21 +791,21 @@ export default function BookingPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
                   <p className="text-xs text-muted-foreground">Total Trip</p>
-                  <p className="text-lg font-semibold">${totalNow}</p>
+                  <p className="text-lg font-semibold">{formatMoney(totalNow)}</p>
                 </div>
                 <div className="rounded-xl bg-background/70 border border-green-500/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
                   <p className="text-xs text-green-600">Due Now (Bond)</p>
-                  <p className="text-lg font-semibold">${BOND_FJD} FJD</p>
+                  <p className="text-lg font-semibold">{formatMoney(BOND_FJD, "FJD")}</p>
                 </div>
                 <div className="rounded-xl bg-background/70 border border-border/40 p-3 sm:p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_20px_-6px_rgba(0,0,0,0.25)]">
                   <p className="text-xs text-muted-foreground">Balance on Arrival</p>
-                  <p className="text-lg font-semibold">${Math.max(totalNow - BOND_FJD, 0)}</p>
+                  <p className="text-lg font-semibold">{formatMoney(Math.max(totalNow - BOND_FJD, 0))}</p>
                 </div>
               </div>
 
               {/* >>> NEW: explicit deposit line just below totals <<< */}
               <p className="text-center text-sm sm:text-base text-foreground">
-                <span className="font-semibold">Deposit Due:</span> ${BOND_FJD} FJD
+                <span className="font-semibold">Deposit Due:</span> {formatMoney(BOND_FJD, "FJD")}
               </p>
 
               {/* Bank Transfer */}
@@ -819,7 +871,7 @@ export default function BookingPage() {
                   <ol className="space-y-2 sm:space-y-2.5 text-sm">
                     <li className="flex gap-2">
                       <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">1</span>
-                      <span>Send <strong>only the bond (${BOND_FJD} FJD)</strong> now using one of the methods above.</span>
+                      <span>Send <strong>only the bond ({formatMoney(BOND_FJD, "FJD")})</strong> now using one of the methods above.</span>
                     </li>
                     <li className="flex gap-2">
                       <span className="shrink-0 mt-[2px] inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-xs font-bold">2</span>
@@ -944,7 +996,7 @@ export default function BookingPage() {
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Base Daily:</span>
-                            <span className="font-bold text-primary">${selectedVehicleData?.pricePerDay}</span>
+                            <span className="font-bold text-primary">{selectedVehicleData ? formatMoney(selectedVehicleData.pricePerDay) : ""}</span>
                           </p>
                         </div>
                       </CardContent>
@@ -991,13 +1043,13 @@ export default function BookingPage() {
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Pickup:</span>
                             <span className="font-medium">
-                              {pickupLocation} {pickupLocation ? `(+$${pickupFee})` : ""}
+                              {pickupLocation} {pickupLocation ? `( +${formatMoney(pickupFee)} )` : "(Free)"}
                             </span>
                           </p>
                           <p className="flex justify-between">
                             <span className="text-muted-foreground">Drop-off:</span>
                             <span className="font-medium">
-                              {dropoffLocation} {dropoffLocation ? `(+$${dropoffFee})` : ""}
+                              {dropoffLocation} {dropoffLocation ? `( +${formatMoney(dropoffFee)} )` : "(Free)"}
                             </span>
                           </p>
                         </div>
@@ -1031,28 +1083,30 @@ export default function BookingPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-white/95 text-sm">
                         <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
                           <span>Vehicle subtotal</span>
-                          <span className="font-semibold">${vehicleSubtotal}</span>
+                          <span className="font-semibold">{formatMoney(vehicleSubtotal)}</span>
                         </div>
                         <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
                           <span>Pickup fee</span>
-                          <span className="font-semibold">${pickupFee}</span>
+                          <span className="font-semibold">{formatMoney(pickupFee)}</span>
                         </div>
                         <div className="flex justify-between bg-white/10 rounded-md px-3 py-2">
                           <span>Drop-off fee</span>
-                          <span className="font-semibold">${dropoffFee}</span>
+                          <span className="font-semibold">{formatMoney(dropoffFee)}</span>
                         </div>
                       </div>
 
                       <div className="flex justify-between items-center text-xl md:text-2xl font-bold text-white mt-2">
                         <span>Total Amount:</span>
-                        <span>${total}</span>
+                        <span>{formatMoney(total)}</span>
                       </div>
 
                       {currentTier && (
                         <>
-                          <p className="text-white/85 text-xs md:text-sm">{currentTier.breakdown}</p>
                           <p className="text-white/85 text-xs md:text-sm">
-                            Current tier: <span className="font-semibold">{currentTier.label}</span> — ${currentTier.rate}/day
+                            {currentTier.days} × {formatMoney(currentTier.rate)}
+                          </p>
+                          <p className="text-white/85 text-xs md:text-sm">
+                            Current tier: <span className="font-semibold">{currentTier.label}</span> — {formatMoney(currentTier.rate)}/day
                           </p>
                         </>
                       )}
@@ -1259,24 +1313,24 @@ export default function BookingPage() {
                         <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs md:text-sm">
                           <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
                             <p className="text-muted-foreground">Base (1–4 days)</p>
-                            <p className="font-semibold">${currentTier.base}</p>
+                            <p className="font-semibold">{formatMoney(currentTier.base)}</p>
                           </div>
                           <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
                             <p className="text-muted-foreground">5–7 days</p>
                             <p className="font-semibold">
-                              ${currentTier.rate5}{currentTier.rate5 === currentTier.base ? " (same as base)" : ""}
+                              {formatMoney(currentTier.rate5)}{currentTier.rate5 === currentTier.base ? " (same as base)" : ""}
                             </p>
                           </div>
                           <div className="rounded-lg bg-card/50 border border-border/40 p-2.5">
                             <p className="text-muted-foreground">8+ days</p>
                             <p className="font-semibold">
-                              ${currentTier.rate8}{currentTier.rate8 === currentTier.rate5 ? " (same as 5–7)" : ""}
+                              {formatMoney(currentTier.rate8)}{currentTier.rate8 === currentTier.rate5 ? " (same as 5–7)" : ""}
                             </p>
                           </div>
 
                           <div className="sm:col-span-3 rounded-lg bg-primary/10 border border-primary/30 p-2.5">
                             <p className="text-xs md:text-sm text-primary font-medium">
-                              Current tier: <span className="font-bold">{currentTier.label}</span> — ${currentTier.rate}/day
+                              Current tier: <span className="font-bold">{currentTier.label}</span> — {formatMoney(currentTier.rate)}/day
                               {currentTier.days > 0 && <> (for your {currentTier.days} day{currentTier.days !== 1 ? "s" : ""} selection)</>}
                             </p>
                           </div>
@@ -1307,7 +1361,7 @@ export default function BookingPage() {
                           <SelectContent className="max-h-[60vh]">
                             {availableVehicles.map((vehicle) => (
                               <SelectItem key={vehicle.id} value={vehicle.id.toString()}>
-                                {vehicle.name} - {vehicle.category} (${vehicle.pricePerDay}/day)
+                                {vehicle.name} - {vehicle.category} ({formatMoney(vehicle.pricePerDay)}/day)
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1341,7 +1395,7 @@ export default function BookingPage() {
                                 const fee = feeFor(location);
                                 return (
                                   <SelectItem key={location} value={location}>
-                                    {location} {fee ? `(+$${fee})` : "(Free)"}
+                                    {location} {fee ? `( +${formatMoney(fee)} )` : "(Free)"}
                                   </SelectItem>
                                 );
                               })}
@@ -1360,7 +1414,7 @@ export default function BookingPage() {
                                 const fee = feeFor(location);
                                 return (
                                   <SelectItem key={location} value={location}>
-                                    {location} {fee ? `(+$${fee})` : "(Free)"}
+                                    {location} {fee ? `( +${formatMoney(fee)} )` : "(Free)"}
                                   </SelectItem>
                                 );
                               })}
@@ -1435,6 +1489,21 @@ export default function BookingPage() {
                   <Card className="card-3d lg:sticky lg:top-24 border-0 bg-gradient-to-br from-primary/5 to-secondary/5">
                     <CardHeader className="pb-4 md:pb-6">
                       <CardTitle className="text-xl md:text-2xl text-center">Booking Summary</CardTitle>
+                      {/* Currency selector (compact, centered) */}
+                      <div id="currency-picker-main" className="flex justify-center pt-2">
+                        <Select value={currency} onValueChange={setCurrency}>
+                          <SelectTrigger className="h-9 w-[160px] text-xs rounded-full border-primary/40">
+                            <Wallet className="h-3.5 w-3.5 mr-1.5 opacity-70" />
+                            <span className="mr-1.5 hidden sm:inline">Currency:</span>
+                            <SelectValue placeholder="Currency" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {currencyList.map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-5 md:space-y-6">
                       {selectedVehicleData ? (
@@ -1462,7 +1531,9 @@ export default function BookingPage() {
 
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Current Daily Rate:</span>
-                              <span className="font-bold text-primary">{currentTier ? `$${currentTier.rate}` : `$${selectedVehicleData.pricePerDay}`}</span>
+                              <span className="font-bold text-primary">
+                                {currentTier ? formatMoney(currentTier.rate) : formatMoney(selectedVehicleData.pricePerDay)}
+                              </span>
                             </div>
                             <div className="flex justify-between items-center p-3 bg-card/50 rounded-lg text-sm md:text-base">
                               <span className="text-muted-foreground">Duration (days):</span>
@@ -1476,28 +1547,28 @@ export default function BookingPage() {
                               {currentTier?.breakdown && (
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Vehicle subtotal:</span>
-                                  <span className="font-mono">${selectedVehicleData ? calculateTieredTotal(selectedVehicleData, currentTier.days) : 0}</span>
+                                  <span className="font-mono">{formatMoney(selectedVehicleData ? calculateTieredTotal(selectedVehicleData, currentTier.days) : 0)}</span>
                                 </div>
                               )}
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Pickup fee:</span>
-                                <span className="font-mono">${pickupFee}</span>
+                                <span className="font-mono">{formatMoney(pickupFee)}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Drop-off fee:</span>
-                                <span className="font-mono">${dropoffFee}</span>
+                                <span className="font-mono">{formatMoney(dropoffFee)}</span>
                               </div>
                             </div>
 
                             <div className="flex justify-between items-center p-4 gradient-primary rounded-lg text-white">
                               <span className="text-base md:text-lg font-bold">Total:</span>
-                              <span className="text-xl md:text-2xl font-bold">${calculateTotal()}</span>
+                              <span className="text-xl md:text-2xl font-bold">{formatMoney(calculateTotal())}</span>
                             </div>
 
-                            {/* >>> NEW: clear deposit notice under total (Booking Summary card) <<< */}
+                            {/* Deposit notice */}
                             <div className="rounded-lg bg-green-600/15 border border-green-500/30 p-3 text-center">
                               <p className="text-xs md:text-sm text-green-200">
-                                Pay <strong>only the refundable deposit now: ${BOND_FJD} FJD</strong>. The remaining balance is paid on arrival.
+                                Pay <strong>only the refundable deposit now: {formatMoney(BOND_FJD, "FJD")}</strong>. The remaining balance is paid on arrival.
                               </p>
                             </div>
                           </div>
@@ -1524,6 +1595,31 @@ export default function BookingPage() {
         </div>
       </section>
 
+      {/* --- Mobile Floating Currency Chip (FAB) --- */}
+      <div className="md:hidden fixed bottom-24 right-4 z-50">
+        <div className="rounded-full backdrop-blur bg-background/95 border border-border/50 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)]">
+          <Select value={currency} onValueChange={setCurrency}>
+            <SelectTrigger
+              className={cn(
+                "h-11 px-4 rounded-full font-semibold tracking-wide min-w-[138px]",
+                "shadow-inner border-primary/40",
+                showCurrencyNudge && "animate-pulse"
+              )}
+              aria-label="Change currency"
+            >
+              <Wallet className="h-4 w-4 mr-2 opacity-80" />
+              <span className="mr-1.5">Currency:</span>
+              <SelectValue placeholder="Currency" />
+            </SelectTrigger>
+            <SelectContent>
+              {currencyList.map((c) => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/* Mobile sticky footer submit */}
       <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden">
         <div className="glass-effect-dark border-t border-white/10 p-3 md:p-4">
@@ -1531,7 +1627,19 @@ export default function BookingPage() {
             <div className="text-white">
               {selectedVehicleData && (
                 <>
-                  <p className="font-bold text-base md:text-lg">${calculateTotal()}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-base md:text-lg">{formatMoney(calculateTotal())}</p>
+                    <span className="px-2 py-0.5 rounded-full bg-white/15 text-white text-[10px] font-semibold tracking-wide">
+                      {currency}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={scrollToCurrency}
+                      className="text-[11px] underline text-white/80"
+                    >
+                      Change
+                    </button>
+                  </div>
                   <p className="text-xs md:text-sm text-white/80">
                     {calculateDays()} day{calculateDays() !== 1 ? "s" : ""}
                   </p>
