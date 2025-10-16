@@ -123,6 +123,25 @@ export default function HomePage() {
                 <Link href="/vehicles">View Fleet</Link>
               </Button>
             </div>
+
+            {/* NEW: Prominent, mobile-friendly legal notice with T&Cs link */}
+            <div className="mt-6 sm:mt-8 flex flex-col items-center">
+              <div className="rounded-full bg-white/15 backdrop-blur px-4 py-2 border border-white/20">
+                <span className="text-white/90 text-sm sm:text-base">
+                  By booking, you agree to our{" "}
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-semibold hover:text-white"
+                  >
+                    Terms &amp; Conditions
+                  </Link>
+                  .
+                </span>
+              </div>
+            </div>
+            {/* END NEW */}
           </div>
         </div>
       </section>
@@ -291,6 +310,16 @@ export default function HomePage() {
                 >
                   Contact Us
                 </Link>
+                {/* NEW: Footer Terms & Conditions link */}
+                <Link
+                  href="/terms"
+                  className="block text-white/80 hover:text-white transition-colors text-lg hover:translate-x-2 transform duration-300"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Terms &amp; Conditions
+                </Link>
+                {/* END NEW */}
               </div>
             </div>
 
