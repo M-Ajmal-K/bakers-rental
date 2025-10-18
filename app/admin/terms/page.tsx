@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,11 +30,6 @@ import {
   Shield,
   LayoutDashboard,
 } from "lucide-react";
-
-/** lazy load same public renderer to keep identical look (kept available if you want it) */
-const PublicTermsRenderer = dynamic(() => import("@/app/terms/page").then((m) => m.default as any), {
-  ssr: false,
-});
 
 /** local preview renderer */
 import ReactMarkdown from "react-markdown";
@@ -199,7 +193,7 @@ Baker's Rental Cars, P.O. Box 1949, Kulukulu, Sigatoka — Phone: **942 7497**, 
     snapshot();
     const { start, end, value } = getSel();
     const before = value.slice(0, start);
-    const sel = value.slice(start, end) || "text";
+    const sel = value.slice(start, end) || "text"; // ← fixed (removed stray 'the')
     const after = value.slice(end);
     const next = `${before}${prefix}${sel}${suffix}${after}`;
     setContentWithUndo(next);
@@ -421,7 +415,7 @@ Baker's Rental Cars, P.O. Box 1949, Kulukulu, Sigatoka — Phone: **942 7497**, 
                   </label>
                 </div>
 
-                {/* TEXTAREA — now white background + black text for high contrast */}
+                {/* TEXTAREA — white background + black text for high contrast */}
                 <textarea
                   ref={taRef}
                   value={content}
