@@ -813,6 +813,20 @@ function DashboardContent() {
                   <div className="text-xs text-white/60">FJD · USD · AUD</div>
                 </div>
               </Link>
+
+              {/* NEW: Terms & Conditions tile */}
+              <Link
+                href="/admin/terms"
+                className="rounded-xl bg-white/5 ring-1 ring-white/10 p-5 flex items-center gap-3 text-white hover:bg-white/10"
+              >
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Terms & Conditions</div>
+                  <div className="text-xs text-white/60">Edit website policy</div>
+                </div>
+              </Link>
             </div>
           )}
         </div>
@@ -966,6 +980,31 @@ function DashboardContent() {
                   </p>
                   <Button asChild className="btn-3d bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-bold shadow-lg shadow-amber-500/20">
                     <Link href="/admin/currencies">Manage Currencies</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* NEW: Terms & Conditions card */}
+            <div className="fade-in-up" style={{ animationDelay: "0.9s" }}>
+              <Card className="h-full border-0 bg-white/[0.04] backdrop-blur-xl ring-1 ring-white/10 hover:ring-white/20 transition-all shadow-xl shadow-black/20">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center gap-3 text-white text-xl">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-black/20">
+                      <Shield className="h-6 w-6 text-white" />
+                    </div>
+                    Terms & Conditions
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col">
+                  <p className="text-cyan-100/80 mb-6 flex-1">
+                    Edit the Terms & Conditions shown on the website. Publish changes instantly.
+                  </p>
+                  <Button
+                    asChild
+                    className="btn-3d bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-400 hover:to-indigo-400 text-white font-bold shadow-lg shadow-sky-500/20"
+                  >
+                    <Link href="/admin/terms">Edit Terms</Link>
                   </Button>
                 </CardContent>
               </Card>
